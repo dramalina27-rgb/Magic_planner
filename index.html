@@ -211,7 +211,8 @@ textarea{resize:vertical; min-height:90px; width:100%;}
 .day-block.setup-mode{outline:2px dashed var(--accent); outline-offset:3px;}
 .day-block.hl{box-shadow:0 0 0 3px var(--pink), var(--shadow);}
 .full-row{grid-column:1 / span 2;}
-.day-side{grid-row:1 / span 2; grid-column:3;}
+.day-col{display:flex; flex-direction:column; gap:16px; min-width:0;}
+.day-side{grid-column:3;}
 .add-item-btn{
   width:100%; border:2px dashed var(--accent); background:none; color:var(--accent); font-weight:700;
   border-radius:12px; padding:9px; margin-top:4px; transition:all .2s; display:flex; align-items:center; justify-content:center; gap:6px;
@@ -418,7 +419,7 @@ textarea{resize:vertical; min-height:90px; width:100%;}
 /* ---- Адаптив ---- */
 @media (max-width:1024px){
   .day-layout{grid-template-columns:1fr 1fr;}
-  .day-side{grid-row:auto; grid-column:1 / -1;}
+  .day-side{grid-column:1 / -1;}
   .ach-grid{grid-template-columns:1fr;}
   .spheres-layout{grid-template-columns:250px minmax(0,1fr); grid-template-rows:auto;}
   .sph-head{grid-column:1 / -1; grid-row:auto;}
@@ -502,16 +503,15 @@ const DIARY_PHRASES = {
 /* Дефолтные сферы (раздел 9.2) */
 const DEFAULT_SPHERES = [
   {name:'Работа', habits:[
-    {name:'Приходить в офис к 10:00', img:'habit_work_office.png'},
     {name:'Статус в 10:30'}],
    tasks:[
-    {name:'Работа по Мультибуку'},{name:'Работа по Репетигру', img:'task_work_repetigr.png'},
+    {name:'Работа по Мультибуку'},
     {name:'Перенести отпуск'},{name:'Зайти в кадры'}]},
   {name:'Уход и здоровье', habits:[{name:'Уход за кожей'},{name:'Уход за зубами'}],
    tasks:[
     {name:'Запись по родинкам'},{name:'Приём по родинкам'},{name:'Сдать кровь'},
     {name:'Маникюр', img:'task_care_manicure.png'},{name:'Педикюр', img:'task_care_pedicure.png'},
-    {name:'Эпиляция'},{name:'Брови'},{name:'Уход для волос', img:'task_care_hair.png'},
+    {name:'Эпиляция'},{name:'Брови'},
     {name:'Массаж', img:'task_care_massage.png'},{name:'Запись на чистку зубов'},{name:'Сделать чистку зубов'}]},
   {name:'Активность и питание', habits:[
     {name:'12к шагов'},{name:'Без еды после 18:00'},
@@ -521,21 +521,21 @@ const DEFAULT_SPHERES = [
     {name:'Прогулка в парке рядом (озеро, у сестры, Поклонка)', img:'task_active_park.png'},
     {name:'Царицыно или Коломенское'},{name:'Участие в забеге', img:'task_active_race.png'}]},
   {name:'Рисование', habits:[], tasks:[
-    {name:'Делать сайт'},{name:'Пост в группу'},{name:'Мастер-класс', img:'task_art_masterclass.png'},
-    {name:'Рисовать акрилом', img:'task_art_acrylic.png'},{name:'Рисовать маслом', img:'task_art_oil.png'},
+    {name:'Делать сайт'},{name:'Пост в группу'},
+    {name:'Рисовать акрилом', img:'task_art_acrylic.png'},
     {name:'Таймлапс с рисованием — выложить'}]},
   {name:'Быт', habits:[], tasks:[
-    {name:'Постирать и развесить', img:'task_home_laundry.png'},{name:'Сменить постель'},
+    {name:'Уборка дома', img:'task_home_laundry.png'},{name:'Сменить постель'},
     {name:'Разобрать книги'},{name:'Разбирать шкаф'},{name:'Разобрать вещи на полу, рисование'},
     {name:'Приклеить плинтуса'},{name:'Заказать вещи для дома'}]},
   {name:'Игровое и досуг', habits:[{name:'Писать в дневник', img:'habit_fun_journal.png'}], tasks:[
-    {name:'Работа над игрой про Леонардо', img:'task_fun_leonardo.png'},{name:'Доделать тест-опрос'},
+    {name:'Доделать тест-опрос'},
     {name:'Симс', img:'task_fun_sims.png'},{name:'Сходить в кино', img:'task_fun_cinema.png'},
     {name:'Сходить в театр'},{name:'Слушать книгу «Чужестранка»'},
-    {name:'Встреча с сестрой', img:'task_fun_sister.png'},{name:'С подругами', img:'task_fun_friends.png'},
-    {name:'Свиданка с мужем', img:'task_fun_date.png'},{name:'Забронировать путешествие'}]},
+    {name:'С подругами', img:'task_fun_friends.png'},
+    {name:'Забронировать путешествие'}]},
   {name:'Блог', habits:[], tasks:[
-    {name:'Редактировать план контента'},{name:'Отснять контент', img:'task_blog_content.png'}]},
+    {name:'Редактировать план контента'}]},
 ];
 /* Костюмы (12.2) */
 const COSTUMES = [
@@ -664,7 +664,6 @@ function loadDB(){
 function migrateDefaultImgs(){
   const imgByName = {};
   DEFAULT_SPHERES.forEach(s=>[...s.tasks, ...s.habits].forEach(it=>{ if(it.img) imgByName[it.name.toLowerCase()] = it.img; }));
-  imgByName['работа над игрой про леонардо'] = 'task_fun_leonardo.png';
   let changed = false;
   const fix = it => { const im = imgByName[(it.name||'').toLowerCase()]; if(im && !it.img && !(it.imgs && it.imgs.length)){ it.img = im; changed = true; } };
   DB.profiles.forEach(p=>{
@@ -699,32 +698,10 @@ function newProfile(name){
     tasks:s.tasks.map(t=>({id:uid(), name:t.name, img:t.img||null})),
     habits:s.habits.map(h=>({id:uid(), name:h.name, img:h.img||null})),
   }));
-  const sphById = n => spheres.find(s=>s.name===n);
-  const findHabit = (sph, n) => sph.habits.find(h=>h.name===n);
-  const fun = sphById('Игровое и досуг'), act = sphById('Активность и питание');
-  // привычка «Работа над игрой про Леонардо» для цели 1 — создаём в сфере «Игровое и досуг»
-  const leoHabit = {id:uid(), name:'Работа над игрой про Леонардо', img:'task_fun_leonardo.png'};
-  fun.habits.push(leoHabit);
-  const goals = [
-    {id:uid(), title:'Завершить игру про Леонардо', sphereId:fun.id, deadline:'2026-08-31', img:null,
-     status:'created', createdAt:Date.now(),
-     tasks:['Оптимизация изображений','Иллюстрации и тексты для главы 2','Иллюстрации и тексты для главы 3',
-            'Иллюстрации и тексты для главы 4','Система ачивок','Протестировать игру'].map(n=>({id:uid(),name:n,done:false})),
-     habits:[{id:uid(), habitId:leoHabit.id, sphereId:fun.id, name:leoHabit.name, targetTotal:20, targetStreak:5}]},
-    {id:uid(), title:'Весить 65 кг', sphereId:act.id, deadline:'2026-09-03', img:null,
-     status:'created', createdAt:Date.now()+1,
-     tasks:[{id:uid(), name:'Встроить привычки первые 10 дней', done:false}],
-     habits:[
-       {id:uid(), habitId:findHabit(act,'12к шагов').id, sphereId:act.id, name:'12к шагов', targetTotal:45, targetStreak:7},
-       {id:uid(), habitId:findHabit(act,'Без еды после 18:00').id, sphereId:act.id, name:'Без еды после 18:00', targetTotal:45, targetStreak:7},
-       {id:uid(), habitId:findHabit(act,'Есть овощи').id, sphereId:act.id, name:'Есть овощи', targetTotal:45, targetStreak:7},
-       {id:uid(), habitId:findHabit(act,'Без доставки').id, sphereId:act.id, name:'Без доставки', targetTotal:30, targetStreak:10},
-     ]},
-  ];
   return {
     id:uid(), name, createdAt:Date.now(), lastLoginAt:Date.now(),
     settings:{theme:'lavender', weekStart:1, focus:null, focusUntil:null, music:false, quizDone:false},
-    coins:100, days:{}, spheres, archive:[], goals, diary:[],
+    coins:100, days:{}, spheres, archive:[], goals:[], diary:[],
     purchases:{costumes:[0], activeCostume:0, house:{}, events:[], travels:[]},
     achievements:{}, savedKeys:{},
     onboarding:{done:false, popupShown:false, tasks:{}},
@@ -1171,8 +1148,28 @@ function render(){
 function gotoTab(tab){
   SCREEN = 'app'; TAB = tab;
   if(tab==='rewards') REWARDS_SUB = 'ach';
+  persistSession();
   render();
   window.scrollTo({top:0});
+}
+/* Запоминаем, кто вошёл и где находится, чтобы обновление страницы не «выкидывало» из системы */
+function persistSession(){
+  DB.session = P ? {profileId:P.id, screen:(SCREEN==='app'?'app':'landing'), tab:TAB} : null;
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); }catch(e){}
+}
+function restoreSession(){
+  const ss = DB.session;
+  if(!ss || !ss.profileId) return;
+  const pf = DB.profiles.find(p=>p.id===ss.profileId);
+  if(!pf) return;
+  P = pf;
+  P.lastLoginAt = Date.now();
+  if(ss.screen==='app' && P.settings.quizDone){
+    SCREEN = 'app';
+    TAB = ss.tab || 'day';
+    OPEN_DATE = todayYmd();
+  }
+  saveDB();
 }
 
 /* ================= НАЧАЛЬНАЯ СТРАНИЦА (раздел 4) ================= */
@@ -1214,7 +1211,7 @@ function renderLanding(){
   const $ = s=>ROOT.querySelector(s);
   if(logged){
     $('#go-plan').onclick = ()=>{ OPEN_DATE = todayYmd(); CAL_VIEW=null; gotoTab('day'); };
-    $('#btn-logout').onclick = ()=>{ P = null; render(); };
+    $('#btn-logout').onclick = ()=>{ P = null; persistSession(); render(); };
     $('#btn-reset').onclick = async ()=>{
       if(await confirmModal(STRINGS.resetConfirm)){ resetProfileData(P); saveDB(); toast('Аккаунт обнулён'); render(); }
     };
@@ -1235,13 +1232,13 @@ function openProfilePicker(){
     : `<p class="muted">Профилей пока нет — создай первый!</p>`;
   list.querySelectorAll('.choice-btn').forEach(b=>b.onclick = ()=>{
     P = DB.profiles.find(p=>p.id===b.dataset.id);
-    P.lastLoginAt = Date.now(); saveDB(); m.close();
+    P.lastLoginAt = Date.now(); persistSession(); m.close();
     if(!P.settings.quizDone) openQuiz(); else render();
   });
   m.root.querySelector('#create-prof').onclick = ()=>{
     const name = m.root.querySelector('#new-prof-name').value.trim();
     if(!name) return;
-    P = newProfile(name); DB.profiles.push(P); saveDB();
+    P = newProfile(name); DB.profiles.push(P); persistSession();
     m.close(); openQuiz();
   };
 }
@@ -1424,7 +1421,7 @@ function renderTopbar(){
     <button id="coin-counter" data-hint="${esc(STRINGS.coinHint)}" data-click="1">${ICONS.coin}<span class="coin-num">${P.coins}</span></button>
     <button class="iconbtn" id="tb-sound" title="${P.settings.music?'Выключить музыку':'Включить музыку'}">${P.settings.music?ICONS.soundOn:ICONS.soundOff}</button>
     <span id="profile-chip">${esc(P.name)}<button class="iconbtn" id="tb-gear" title="Настройки">${ICONS.gear}</button></span>`;
-  tb.querySelector('#tb-home').onclick = ()=>{ SCREEN='landing'; render(); };
+  tb.querySelector('#tb-home').onclick = ()=>{ SCREEN='landing'; persistSession(); render(); };
   tb.querySelectorAll('.tab-link').forEach(b=>b.onclick = ()=>gotoTab(b.dataset.tab));
   tb.querySelector('#tb-sound').onclick = toggleMusic;
   tb.querySelector('#tb-gear').onclick = openSettings;
@@ -1488,34 +1485,38 @@ function renderDayTab(c){
   c.innerHTML = `
     <div id="day-banner">${imgHTML(banner,'Баннер месяца')}<div class="banner-caption">${caption}</div></div>
     <div class="day-layout ${day.completed?'dim':''}">
-      <div class="day-block ${setup?'setup-mode':''} ${focusHL('schedule')}" id="blk-schedule">
-        <h3>🕐 Расписание <span class="count">${day.schedule.length}/8</span>
-          ${setup && day.schedule.length<8 && lastFilledDay(date,'schedule')? `<button class="btn small secondary right" data-copy="schedule">Скопировать прошлые</button>`:''}
-        </h3>
-        <div class="items"></div>
-        ${setup? `<button class="add-item-btn" data-add="schedule" ${day.schedule.length>=8?'disabled data-hint="Лимит: 8 дел расписания"':''}>${ICONS.plus} Добавить</button>`:''}
+      <div class="day-col">
+        <div class="day-block ${setup?'setup-mode':''} ${focusHL('schedule')}" id="blk-schedule">
+          <h3>🕐 Расписание <span class="count">${day.schedule.length}/10</span>
+            ${setup && day.schedule.length<10 && lastFilledDay(date,'schedule')? `<button class="btn small secondary right" data-copy="schedule">Скопировать прошлые</button>`:''}
+          </h3>
+          <div class="items"></div>
+          ${setup? `<button class="add-item-btn" data-add="schedule" ${day.schedule.length>=10?'disabled data-hint="Лимит: 10 дел расписания"':''}>${ICONS.plus} Добавить</button>`:''}
+        </div>
+        <div class="day-block ${setup?'setup-mode':''} ${focusHL('habits')}" id="blk-habits">
+          <h3>🔁 Привычки <span class="count">${day.habits.length}/10</span>
+            ${setup && day.habits.length<10 && lastFilledDay(date,'habits')? `<button class="btn small secondary right" data-copy="habits">Скопировать прошлые</button>`:''}
+          </h3>
+          <div class="items"></div>
+          ${setup? `<button class="add-item-btn" data-add="habits" ${day.habits.length>=10?'disabled data-hint="Лимит: 10 привычек"':''}>${ICONS.plus} Добавить</button>`:''}
+        </div>
       </div>
-      <div class="day-block ${setup?'setup-mode':''} ${focusHL('tasks')}" id="blk-tasks">
-        <h3>📋 Задачи дня <span class="count">${day.tasks.length}/8</span>
-          ${setup && day.tasks.length<8 && lastFilledDay(date,'tasks')? `<button class="btn small secondary right" data-copy="tasks">Скопировать прошлые</button>`:''}
-        </h3>
-        <div class="items"></div>
-        ${setup? `<button class="add-item-btn" data-add="tasks" ${day.tasks.length>=8?'disabled data-hint="Лимит: 8 задач дня"':''}>${ICONS.plus} Добавить</button>`:''}
-      </div>
-      <div class="day-block ${setup?'setup-mode':''} ${focusHL('habits')}" id="blk-habits">
-        <h3>🔁 Привычки <span class="count">${day.habits.length}/10</span>
-          ${setup && day.habits.length<10 && lastFilledDay(date,'habits')? `<button class="btn small secondary right" data-copy="habits">Скопировать прошлые</button>`:''}
-        </h3>
-        <div class="items"></div>
-        ${setup? `<button class="add-item-btn" data-add="habits" ${day.habits.length>=10?'disabled data-hint="Лимит: 10 привычек"':''}>${ICONS.plus} Добавить</button>`:''}
-      </div>
-      <div class="day-block">
-        <h3>📝 Заметки ${!locked && !noteEditing(date, day)? `<button class="btn small secondary right" id="edit-note">${ICONS.pencil} Редактировать</button>`:''}</h3>
-        ${noteEditing(date, day) && !locked ? `
-          <textarea id="day-note" maxlength="2000" placeholder="Мысли, планы, наблюдения… Ссылки станут кликабельными.">${esc(day.note)}</textarea>
-          <div class="note-count"><span id="note-count">${day.note.length}</span>/2000</div>
-          <button class="btn small" id="save-note">Сохранить</button>`
-        : `<div class="note-view">${day.note? linkify(day.note) : '<span class="muted">Пока пусто'+(locked?'':' — нажми «Редактировать»')+'</span>'}</div>`}
+      <div class="day-col">
+        <div class="day-block ${setup?'setup-mode':''} ${focusHL('tasks')}" id="blk-tasks">
+          <h3>📋 Задачи дня <span class="count">${day.tasks.length}/10</span>
+            ${setup && day.tasks.length<10 && lastFilledDay(date,'tasks')? `<button class="btn small secondary right" data-copy="tasks">Скопировать прошлые</button>`:''}
+          </h3>
+          <div class="items"></div>
+          ${setup? `<button class="add-item-btn" data-add="tasks" ${day.tasks.length>=10?'disabled data-hint="Лимит: 10 задач дня"':''}>${ICONS.plus} Добавить</button>`:''}
+        </div>
+        <div class="day-block">
+          <h3>📝 Заметки ${!locked && !noteEditing(date, day)? `<button class="btn small secondary right" id="edit-note">${ICONS.pencil} Редактировать</button>`:''}</h3>
+          ${noteEditing(date, day) && !locked ? `
+            <textarea id="day-note" maxlength="2000" placeholder="Мысли, планы, наблюдения… Ссылки станут кликабельными.">${esc(day.note)}</textarea>
+            <div class="note-count"><span id="note-count">${day.note.length}</span>/2000</div>
+            <button class="btn small" id="save-note">Сохранить</button>`
+          : `<div class="note-view">${day.note? linkify(day.note) : '<span class="muted">Пока пусто'+(locked?'':' — нажми «Редактировать»')+'</span>'}</div>`}
+        </div>
       </div>
       <div class="day-side">
         <div class="day-block">${miniCalHTML()}</div>
@@ -1549,7 +1550,7 @@ function renderDayTab(c){
     const kind = b.dataset.copy;
     const src = lastFilledDay(date, kind);
     if(!src) return;
-    const limit = kind==='habits' ? 10 : 8;
+    const limit = 10;
     P.days[src][kind].forEach(o=>{
       if(day[kind].length>=limit) return;
       if(kind==='habits'){
@@ -1611,10 +1612,11 @@ function renderDayItems(container, list, kind, day){
         <button class="iconbtn" data-del="${it.id}" title="Убрать из дня">${ICONS.trash}</button></span>`:''}
     </div>`;
   }).join('') || `<p class="muted" style="padding:4px 2px">${DAY_MODE==='setup'?'Нажми «Добавить» ниже':'Пока пусто'}</p>`;
-  // отметки
+  // отметки: клик ставит, повторный клик по той же — снимает (пока день не завершён)
   container.querySelectorAll('[data-mark]').forEach(b=>b.onclick = ()=>{
     const it = list.find(x=>x.id===b.dataset.for);
-    it.mark = b.dataset.mark; saveDB(); render();
+    it.mark = (it.mark === b.dataset.mark) ? null : b.dataset.mark;
+    saveDB(); render();
   });
   // редактирование / удаление / картинки
   container.querySelectorAll('[data-edit]').forEach(b=>b.onclick = ()=>{
@@ -1628,7 +1630,7 @@ function renderDayItems(container, list, kind, day){
   });
   container.querySelectorAll('[data-view]').forEach(im=>im.onclick = ()=>{
     const it = list.find(x=>x.id===im.dataset.view);
-    openGallery(it, day.completed || isPastDate(OPEN_DATE));
+    openGallery(it, day.completed);
   });
 }
 /* редактирование любого дела/привычки дня (в т.ч. вписанного вручную) */
@@ -1763,7 +1765,7 @@ function renderSideBtns(box, day){
   const saved = !!P.savedKeys['day:'+OPEN_DATE];
   box.innerHTML = `
     <button class="btn" id="d-setup" ${past || day.completed ? `disabled data-hint="${day.completed?'День завершён и заблокирован':STRINGS.hintPastDay}"`:''}>Настроить день</button>
-    <button class="btn" id="d-mark" ${!dayHasItems(day) || day.completed || past ? `disabled data-hint="${day.completed?'День уже завершён': past?'Прошедший день отметить нельзя — он считается пропущенным':STRINGS.hintMark}"`:''}>Отметить выполнение</button>
+    <button class="btn" id="d-mark" ${!dayHasItems(day) || day.completed ? `disabled data-hint="${day.completed?'День уже завершён':STRINGS.hintMark}"`:''}>Отметить выполнение</button>
     <button class="btn ${saved?'secondary':''}" id="d-diary" ${!day.completed || saved ? `disabled data-hint="${saved?'Уже в дневнике':STRINGS.hintSaveDiary}"`:''}>${saved?'Сохранено ✓':'Сохранить день в дневник'}</button>`;
   const st = box.querySelector('#d-setup');
   if(!st.disabled) st.onclick = ()=>{ DAY_MODE='setup'; render(); };
@@ -1947,11 +1949,11 @@ function distributePicked(picked, day){
       day.habits.push({id:uid(), name:p.name, habitId:p.habitId||null, sphereId:p.sphereId||null, goalId:p.goalId||null, img:pImgs[0]||null, imgs:pImgs, mark:null});
       added++;
     } else if(p.time){
-      if(day.schedule.length>=8){ skipped++; return; }
+      if(day.schedule.length>=10){ skipped++; return; }
       day.schedule.push({id:uid(), name:p.name, time:p.time, dur:p.dur||60, sphereId:p.sphereId||null, goalId:p.goalId||null, goalTaskId:p.goalTaskId||null, img:pImgs[0]||null, imgs:pImgs, mark:null});
       added++;
     } else {
-      if(day.tasks.length>=8){ skipped++; return; }
+      if(day.tasks.length>=10){ skipped++; return; }
       day.tasks.push({id:uid(), name:p.name, sphereId:p.sphereId||null, goalId:p.goalId||null, goalTaskId:p.goalTaskId||null, img:pImgs[0]||null, imgs:pImgs, mark:null});
       added++;
     }
@@ -2920,6 +2922,7 @@ function openLeisure(kind, id){
 
 /* ================= СТАРТ ================= */
 loadDB();
+restoreSession();
 render();
 window.addEventListener('resize', ()=>{ const cv = document.getElementById('confetti-canvas'); if(cv.width) { cv.width = innerWidth; cv.height = innerHeight; } });
 </script>
