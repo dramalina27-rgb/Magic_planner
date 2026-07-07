@@ -356,6 +356,13 @@ textarea{resize:vertical; min-height:90px; width:100%;}
 .leisure-cell.locked{filter:grayscale(.85) opacity(.8);}
 .leisure-cell .l-info{padding:9px 12px;}
 .gallery-dots{display:flex; gap:6px; justify-content:center; margin-top:8px;}
+.gal-arr{position:absolute; top:50%; transform:translateY(-50%); z-index:4; width:40px; height:40px; border-radius:50%; border:none; background:rgba(255,255,255,.88); color:var(--accent-dark); font-size:24px; font-weight:800; cursor:pointer; box-shadow:var(--shadow); line-height:1;}
+.gal-arr:hover{background:#fff;}
+.note-view{font-size:15px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; background:#FBF8FF; border:1px solid #EFE9F8; border-radius:10px; padding:10px 12px; min-height:56px;}
+.note-view a, .freetext a{color:var(--accent); font-weight:700;}
+.thumb-wrap{position:relative; display:inline-flex; flex-shrink:0;}
+.thumb-count{position:absolute; right:-5px; bottom:-5px; background:var(--accent); color:#fff; font-size:11px; font-weight:800; border-radius:8px; padding:1px 5px; box-shadow:0 1px 4px rgba(0,0,0,.25); pointer-events:none;}
+.modal .field input, .modal .field select, .modal .field textarea{width:100%;}
 .gallery-dots span{width:9px;height:9px;border-radius:50%;background:#E0D6F0;cursor:pointer;}
 .gallery-dots span.on{background:var(--accent);}
 
@@ -642,6 +649,8 @@ let SEL_SPHERE = null;
 let DIARY_PAGE = 0;
 let SEL_COSTUME = null, SEL_ROOM = 'facade', SEL_LEISURE = null;
 let SPH_STATS_OPEN = false;
+let NOTE_EDIT = null;
+let IMGS_PRELOADED = false;
 let OPEN_GOALS = new Set();
 
 function loadDB(){
@@ -657,7 +666,7 @@ function migrateDefaultImgs(){
   DEFAULT_SPHERES.forEach(s=>[...s.tasks, ...s.habits].forEach(it=>{ if(it.img) imgByName[it.name.toLowerCase()] = it.img; }));
   imgByName['работа над игрой про леонардо'] = 'task_fun_leonardo.png';
   let changed = false;
-  const fix = it => { const im = imgByName[(it.name||'').toLowerCase()]; if(im && !it.img){ it.img = im; changed = true; } };
+  const fix = it => { const im = imgByName[(it.name||'').toLowerCase()]; if(im && !it.img && !(it.imgs && it.imgs.length)){ it.img = im; changed = true; } };
   DB.profiles.forEach(p=>{
     (p.spheres||[]).forEach(s=>{ (s.tasks||[]).forEach(fix); (s.habits||[]).forEach(fix); });
     (p.archive||[]).forEach(s=>{ (s.tasks||[]).forEach(fix); (s.habits||[]).forEach(fix); });
@@ -1362,7 +1371,34 @@ function renderAdmin(){
   });
 }
 /* ================= КАРКАС ПРИЛОЖЕНИЯ (раздел 6) ================= */
+/* Предзагрузка всех статичных картинок — один раз за сессию.
+   Прогревает кэш браузера, чтобы вкладки не «моргали» при переключении. */
+function preloadImages(){
+  if(IMGS_PRELOADED) return;
+  IMGS_PRELOADED = true;
+  const L = [];
+  for(let i=1;i<=12;i++) L.push(`day_header_month_${pad2(i)}.png`);
+  DEFAULT_SPHERES.forEach(s=>[...s.tasks, ...s.habits].forEach(it=>{ if(it.img) L.push(it.img); }));
+  COSTUMES.forEach(cs=>L.push(`char_costume_${pad2(cs.id)}.png`));
+  HOUSE_ROOMS.forEach(r=>{ for(let l=0;l<=r.upgrades.length;l++) L.push(`${r.file}_lvl${l}.png`); });
+  EVENTS.forEach(ev=>L.push(`event_${pad2(ev.id)}.png`));
+  TRAVELS.forEach(t=>{ for(let g=1;g<=3;g++) L.push(`travel_${pad2(t.id)}_${g}.png`); });
+  ['winter','spring','summer','autumn'].forEach(sn=>{
+    ['spheres','goals'].forEach(p=>{ L.push(`${p}_side_${sn}.png`); L.push(`${p}_side_${sn}_wide.png`); });
+  });
+  L.push('ach_side.png','ach_side_wide.png','diary_spread.png','popup_day_done.png','onboarding_welcome.png','quiz_fairy.png','logo.png','welcome_hero.png');
+  // грузим по 4 параллельно, не мешая интерфейсу
+  let i = 0;
+  const next = ()=>{
+    if(i >= L.length) return;
+    const im = new Image();
+    im.onload = im.onerror = ()=>setTimeout(next, 0);
+    im.src = 'images/' + L[i++];
+  };
+  for(let k=0;k<4;k++) next();
+}
 function renderApp(){
+  preloadImages();
   ROOT.innerHTML = `<div id="topbar"></div><div class="page" id="tab-content"></div>`;
   renderTopbar();
   const c = document.getElementById('tab-content');
@@ -1453,27 +1489,33 @@ function renderDayTab(c){
     <div id="day-banner">${imgHTML(banner,'Баннер месяца')}<div class="banner-caption">${caption}</div></div>
     <div class="day-layout ${day.completed?'dim':''}">
       <div class="day-block ${setup?'setup-mode':''} ${focusHL('schedule')}" id="blk-schedule">
-        <h3>🕐 Расписание <span class="count">${day.schedule.length}/8</span></h3>
+        <h3>🕐 Расписание <span class="count">${day.schedule.length}/8</span>
+          ${setup && day.schedule.length<8 && lastFilledDay(date,'schedule')? `<button class="btn small secondary right" data-copy="schedule">Скопировать прошлые</button>`:''}
+        </h3>
         <div class="items"></div>
         ${setup? `<button class="add-item-btn" data-add="schedule" ${day.schedule.length>=8?'disabled data-hint="Лимит: 8 дел расписания"':''}>${ICONS.plus} Добавить</button>`:''}
       </div>
       <div class="day-block ${setup?'setup-mode':''} ${focusHL('tasks')}" id="blk-tasks">
-        <h3>📋 Задачи дня <span class="count">${day.tasks.length}/8</span></h3>
+        <h3>📋 Задачи дня <span class="count">${day.tasks.length}/8</span>
+          ${setup && day.tasks.length<8 && lastFilledDay(date,'tasks')? `<button class="btn small secondary right" data-copy="tasks">Скопировать прошлые</button>`:''}
+        </h3>
         <div class="items"></div>
         ${setup? `<button class="add-item-btn" data-add="tasks" ${day.tasks.length>=8?'disabled data-hint="Лимит: 8 задач дня"':''}>${ICONS.plus} Добавить</button>`:''}
       </div>
       <div class="day-block ${setup?'setup-mode':''} ${focusHL('habits')}" id="blk-habits">
-        <h3>🔁 Привычки <span class="count">${day.habits.length}/6</span>
-          ${setup && day.habits.length<6 && lastHabitsDay(date)? `<button class="btn small secondary right" id="copy-habits">Скопировать прошлые</button>`:''}
+        <h3>🔁 Привычки <span class="count">${day.habits.length}/10</span>
+          ${setup && day.habits.length<10 && lastFilledDay(date,'habits')? `<button class="btn small secondary right" data-copy="habits">Скопировать прошлые</button>`:''}
         </h3>
         <div class="items"></div>
-        ${setup? `<button class="add-item-btn" data-add="habits" ${day.habits.length>=6?'disabled data-hint="Лимит: 6 привычек"':''}>${ICONS.plus} Добавить</button>`:''}
+        ${setup? `<button class="add-item-btn" data-add="habits" ${day.habits.length>=10?'disabled data-hint="Лимит: 10 привычек"':''}>${ICONS.plus} Добавить</button>`:''}
       </div>
       <div class="day-block">
-        <h3>📝 Заметки</h3>
-        <textarea id="day-note" maxlength="2000" ${locked?'disabled':''} placeholder="Мысли, планы, наблюдения…">${esc(day.note)}</textarea>
-        <div class="note-count"><span id="note-count">${day.note.length}</span>/2000</div>
-        ${locked?'':'<button class="btn small" id="save-note">Сохранить</button>'}
+        <h3>📝 Заметки ${!locked && !noteEditing(date, day)? `<button class="btn small secondary right" id="edit-note">${ICONS.pencil} Редактировать</button>`:''}</h3>
+        ${noteEditing(date, day) && !locked ? `
+          <textarea id="day-note" maxlength="2000" placeholder="Мысли, планы, наблюдения… Ссылки станут кликабельными.">${esc(day.note)}</textarea>
+          <div class="note-count"><span id="note-count">${day.note.length}</span>/2000</div>
+          <button class="btn small" id="save-note">Сохранить</button>`
+        : `<div class="note-view">${day.note? linkify(day.note) : '<span class="muted">Пока пусто'+(locked?'':' — нажми «Редактировать»')+'</span>'}</div>`}
       </div>
       <div class="day-side">
         <div class="day-block">${miniCalHTML()}</div>
@@ -1491,29 +1533,52 @@ function renderDayTab(c){
   // кнопки
   renderSideBtns(c.querySelector('#side-btns'), day);
   // заметка
+  const en = c.querySelector('#edit-note');
+  if(en) en.onclick = ()=>{ NOTE_EDIT = date; render(); };
   const note = c.querySelector('#day-note');
-  note.oninput = ()=> c.querySelector('#note-count').textContent = note.value.length;
+  if(note){
+    note.oninput = ()=> c.querySelector('#note-count').textContent = note.value.length;
+    if(NOTE_EDIT===date) note.focus();
+  }
   const sn = c.querySelector('#save-note');
-  if(sn) sn.onclick = ()=>{ day.note = note.value; saveDB(); toast('Заметка сохранена'); };
+  if(sn) sn.onclick = ()=>{ day.note = note.value; NOTE_EDIT = null; saveDB(); toast('Заметка сохранена'); render(); };
   // добавление
   c.querySelectorAll('[data-add]').forEach(b=>b.onclick = ()=>openAddMenu(b.dataset.add, day, b));
-  const ch = c.querySelector('#copy-habits');
-  if(ch) ch.onclick = ()=>{
-    const src = lastHabitsDay(date);
+  // копирование из последнего заполненного дня
+  c.querySelectorAll('[data-copy]').forEach(b=>b.onclick = ()=>{
+    const kind = b.dataset.copy;
+    const src = lastFilledDay(date, kind);
     if(!src) return;
-    P.days[src].habits.forEach(h=>{
-      if(day.habits.length>=6) return;
-      if(!day.habits.some(x=>x.habitId===h.habitId))
-        day.habits.push({id:uid(), name:h.name, habitId:h.habitId, sphereId:h.sphereId, goalId:h.goalId||null, img:h.img||null, mark:null});
+    const limit = kind==='habits' ? 10 : 8;
+    P.days[src][kind].forEach(o=>{
+      if(day[kind].length>=limit) return;
+      if(kind==='habits'){
+        if(day.habits.some(x=>x.habitId && x.habitId===o.habitId)) return;
+        day.habits.push({id:uid(), name:o.name, habitId:o.habitId, sphereId:o.sphereId, goalId:o.goalId||null, img:o.img||null, imgs:imgsOf(o).slice(), mark:null});
+      } else {
+        if(day[kind].some(x=>x.name.toLowerCase()===o.name.toLowerCase())) return;
+        const item = {id:uid(), name:o.name, sphereId:o.sphereId||null, img:o.img||null, imgs:imgsOf(o).slice(), mark:null};
+        if(kind==='schedule'){ item.time = o.time; item.dur = o.dur||60; }
+        day[kind].push(item);
+      }
     });
     saveDB(); onbComplete(2); render();
-  };
+  });
   // подсветка пересечений расписания
   markOverlaps(day);
 }
-function lastHabitsDay(before){
-  const dates = Object.keys(P.days).filter(d=>d<before && P.days[d].habits.length).sort();
+function lastFilledDay(before, kind){
+  const dates = Object.keys(P.days).filter(d=>d<before && P.days[d][kind] && P.days[d][kind].length).sort();
   return dates.length ? dates[dates.length-1] : null;
+}
+function noteEditing(date, day){
+  const locked = day.completed || isPastDate(date);
+  return !locked && (NOTE_EDIT===date || !day.note);
+}
+/* превращает URL в кликабельные ссылки (текст предварительно экранируется) */
+function linkify(text){
+  return esc(text).replace(/(https?:\/\/[^\s<]+)/g,
+    u=>`<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
 }
 function markOverlaps(day){
   const items = [...day.schedule].sort((a,b)=>a.time<b.time?-1:1);
@@ -1532,15 +1597,17 @@ function renderDayItems(container, list, kind, day){
   if(kind==='schedule') list.sort((a,b)=> (a.time||'') < (b.time||'') ? -1 : 1);
   container.innerHTML = list.map(it=>{
     const marks = kind==='habits' ? ['done','fail'] : ['done','part','fail','cancel'];
+    const imgs = imgsOf(it);
     return `<div class="item-card" data-item="${it.id}" style="--sphere-color:${sphereColor(it.sphereId)}">
       ${it.time? `<span class="time-badge">${it.time}<div style="font-size:11px;font-weight:600;color:#A395C2">${durLabel(it.dur||60)}</div></span>`:''}
-      ${it.img? `<img class="thumb" src="${it.img.startsWith('data:')? it.img : 'images/'+it.img}" data-view="${it.id}" alt="" onerror="this.remove()">`:''}
+      ${imgs.length? `<span class="thumb-wrap"><img class="thumb" src="${srcOf(imgs[0])}" data-view="${it.id}" alt="" onerror="this.parentNode.remove()">${imgs.length>1?`<span class="thumb-count">+${imgs.length-1}</span>`:''}</span>`:''}
       <span class="title">${it.goalId? '<span class="goal-flag" title="Дело цели">🎯</span> ':''}${esc(it.name)}</span>
       ${DAY_MODE==='mark' && !day.completed ? `<span class="marks">${marks.map(mk=>
         `<button class="mark-btn mark-${mk} ${it.mark===mk?'sel':''}" data-mark="${mk}" data-for="${it.id}" title="${({done:'Выполнено',part:'Частично',fail:'Не выполнено',cancel:'Отменено'})[mk]}">${MARK_SYMBOLS[mk]}</button>`).join('')}</span>`
       : it.mark? `<span class="marks"><span class="mark-btn mark-${it.mark} sel" style="cursor:default">${MARK_SYMBOLS[it.mark]}</span></span>` : ''}
       ${DAY_MODE==='setup' && !day.completed ? `<span class="marks">
-        <button class="iconbtn" data-img="${it.id}" title="${it.img?'Заменить картинку':'Добавить картинку'}">${ICONS.camera}</button>
+        <button class="iconbtn" data-edit="${it.id}" title="Редактировать">${ICONS.pencil}</button>
+        <button class="iconbtn" data-img="${it.id}" title="Картинки (до 5)">${ICONS.camera}</button>
         <button class="iconbtn" data-del="${it.id}" title="Убрать из дня">${ICONS.trash}</button></span>`:''}
     </div>`;
   }).join('') || `<p class="muted" style="padding:4px 2px">${DAY_MODE==='setup'?'Нажми «Добавить» ниже':'Пока пусто'}</p>`;
@@ -1549,35 +1616,105 @@ function renderDayItems(container, list, kind, day){
     const it = list.find(x=>x.id===b.dataset.for);
     it.mark = b.dataset.mark; saveDB(); render();
   });
-  // удаление / картинка
+  // редактирование / удаление / картинки
+  container.querySelectorAll('[data-edit]').forEach(b=>b.onclick = ()=>{
+    openItemEdit(list.find(x=>x.id===b.dataset.edit), kind);
+  });
   container.querySelectorAll('[data-del]').forEach(b=>b.onclick = ()=>{
     const i = list.findIndex(x=>x.id===b.dataset.del); list.splice(i,1); saveDB(); render();
   });
   container.querySelectorAll('[data-img]').forEach(b=>b.onclick = ()=>{
-    const it = list.find(x=>x.id===b.dataset.img);
-    const inp = document.createElement('input'); inp.type='file'; inp.accept='image/*';
-    inp.onchange = async ()=>{
-      try{ it.img = await compressImage(inp.files[0]); saveDB(); render(); }
-      catch(e){ toast(STRINGS.storageFull); }
-    };
-    inp.click();
+    openImagesEdit(list.find(x=>x.id===b.dataset.img));
   });
   container.querySelectorAll('[data-view]').forEach(im=>im.onclick = ()=>{
     const it = list.find(x=>x.id===im.dataset.view);
-    openImageView(it, day.completed || isPastDate(OPEN_DATE));
+    openGallery(it, day.completed || isPastDate(OPEN_DATE));
   });
 }
-function openImageView(it, readOnly){
-  const src = it.img.startsWith('data:')? it.img : 'images/'+it.img;
-  const m = openModal(`<div style="border-radius:12px;overflow:hidden;margin-bottom:12px;max-height:60vh;display:flex;justify-content:center">
-      <img src="${src}" alt="" style="max-height:60vh;object-fit:contain"></div>
-    <p class="caveat" style="text-align:center">${esc(it.name)}</p>
-    ${readOnly?'':'<div style="text-align:center" class="mt"><button class="btn danger small" id="img-del">Удалить картинку</button></div>'}`);
-  const del = m.root.querySelector('#img-del');
-  if(del) del.onclick = async ()=>{
-    if(await confirmModal('Удалить картинку?', 'Да, удалить')){ it.img = null; saveDB(); m.close(); render(); }
+/* редактирование любого дела/привычки дня (в т.ч. вписанного вручную) */
+function openItemEdit(it, kind){
+  const m = openModal(`<h3 class="mb">Редактировать</h3>
+    <div class="field"><label>Название</label><input id="ie-name" maxlength="100" value="${esc(it.name)}"></div>
+    ${kind==='schedule'? timeFields('ie', it.time, it.dur) : ''}
+    <div style="text-align:right"><button class="btn" id="ie-save">Сохранить</button></div>`);
+  const $ = s=>m.root.querySelector(s);
+  $('#ie-name').focus();
+  $('#ie-save').onclick = ()=>{
+    const name = $('#ie-name').value.trim(); if(!name) return;
+    it.name = name;
+    if(kind==='schedule'){ it.time = $('#ie-time').value; it.dur = +$('#ie-dur').value; }
+    saveDB(); m.close(); render();
   };
 }
+/* ---- картинки позиций: до 5 штук с листалкой ---- */
+function imgsOf(it){
+  if(Array.isArray(it.imgs) && it.imgs.length) return it.imgs;
+  return it.img ? [it.img] : [];
+}
+function srcOf(im){ return im.startsWith('data:')? im : 'images/'+im; }
+function syncImg(it){ it.imgs = imgsOf(it); it.img = it.imgs[0] || null; }
+function openGallery(it, readOnly){
+  const imgs = imgsOf(it);
+  if(!imgs.length) return;
+  let gi = 0;
+  const m = openModal(`
+    <div style="position:relative">
+      <div id="gal-img" style="border-radius:12px;overflow:hidden;margin-bottom:10px;height:min(420px,56vh);display:flex;justify-content:center;align-items:center;background:#F3EEFB"></div>
+      ${imgs.length>1? `
+        <button class="gal-arr" id="gal-prev" style="left:8px">‹</button>
+        <button class="gal-arr" id="gal-next" style="right:8px">›</button>`:''}
+    </div>
+    ${imgs.length>1? `<div class="gallery-dots" id="gal-dots">${imgs.map((_,i)=>`<span data-g="${i}" class="${i===0?'on':''}"></span>`).join('')}</div>`:''}
+    <p class="caveat" style="text-align:center">${esc(it.name||it.title||'')}</p>
+    ${readOnly?'':'<div style="text-align:center" class="mt"><button class="btn secondary small" id="gal-edit">Управлять картинками</button></div>'}`);
+  const box = m.root.querySelector('#gal-img');
+  const draw = ()=>{
+    box.innerHTML = `<img src="${srcOf(imgs[gi])}" alt="" style="max-width:100%;max-height:100%;object-fit:contain">`;
+    m.root.querySelectorAll('[data-g]').forEach(d=>d.classList.toggle('on', +d.dataset.g===gi));
+  };
+  draw();
+  const step = d => { gi = (gi + d + imgs.length) % imgs.length; draw(); };
+  const pv = m.root.querySelector('#gal-prev'), nx = m.root.querySelector('#gal-next');
+  if(pv) pv.onclick = ()=>step(-1);
+  if(nx) nx.onclick = ()=>step(1);
+  m.root.querySelectorAll('[data-g]').forEach(d=>d.onclick = ()=>{ gi = +d.dataset.g; draw(); });
+  const ed = m.root.querySelector('#gal-edit');
+  if(ed) ed.onclick = ()=>{ m.close(); openImagesEdit(it); };
+}
+function openImagesEdit(it, title){
+  syncImg(it);
+  const m = openModal(`<h3 class="mb">${esc(title || 'Картинки: '+(it.name||it.title||''))}</h3>
+    <p class="muted mb" style="font-size:13.5px">Можно прикрепить до 5 картинок — они листаются при просмотре.</p>
+    <div id="ie-imgs" class="flex wrap"></div>
+    <div class="mt"><button class="btn secondary small" id="ie-addimg">${ICONS.plus} Добавить картинку</button></div>`,
+    {onClose:render});
+  const box = m.root.querySelector('#ie-imgs'), addBtn = m.root.querySelector('#ie-addimg');
+  const draw = ()=>{
+    box.innerHTML = it.imgs.map((im,i)=>`<span style="position:relative;display:inline-block">
+      <img src="${srcOf(im)}" alt="" style="width:96px;height:96px;object-fit:cover;border-radius:10px;box-shadow:var(--shadow)">
+      <button class="iconbtn" data-rmimg="${i}" title="Удалить" style="position:absolute;top:2px;right:2px;background:#fff;border-radius:50%">${ICONS.trash}</button>
+    </span>`).join('') || '<p class="muted">Картинок пока нет</p>';
+    addBtn.style.display = it.imgs.length>=5 ? 'none' : '';
+    box.querySelectorAll('[data-rmimg]').forEach(b=>b.onclick = async ()=>{
+      if(await confirmModal('Удалить картинку?', 'Да, удалить')){
+        it.imgs.splice(+b.dataset.rmimg, 1); syncImg(it); saveDB(); draw();
+      }
+    });
+  };
+  draw();
+  addBtn.onclick = ()=>{
+    const inp = document.createElement('input'); inp.type='file'; inp.accept='image/*';
+    inp.onchange = async ()=>{
+      try{
+        const d = await compressImage(inp.files[0]);
+        it.imgs.push(d); syncImg(it); saveDB(); draw();
+      }catch(e){ toast(STRINGS.storageFull); }
+    };
+    inp.click();
+  };
+}
+/* обратная совместимость со старыми вызовами */
+function openImageView(it, readOnly){ openGallery(it, readOnly); }
 function legendHTML(day){
   return `<div class="day-block legend" style="margin-top:12px">
     <div class="row"><span class="dot mark-done">${MARK_SYMBOLS.done}</span> выполнено</div>
@@ -1585,9 +1722,11 @@ function legendHTML(day){
     <div class="row"><span class="dot mark-fail">${MARK_SYMBOLS.fail}</span> не выполнено</div>
     <div class="row"><span class="dot mark-cancel">${MARK_SYMBOLS.cancel}</span> отменено</div>
     <div class="side-btns">
+      <button class="btn secondary" id="mark-save">Сохранить</button>
       <button class="btn secondary" id="mark-cancel-all">Отменить</button>
       <button class="btn" id="finish-day" ${dayAllMarked(day)?'':'disabled data-hint="Отметь все дела и привычки дня"'}>Завершить день</button>
-    </div></div>`;
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:8px">«Сохранить» — оставить проставленные отметки и выйти. «Отменить» — сбросить все отметки.</p></div>`;
 }
 function renderSideBtns(box, day){
   const past = isPastDate(OPEN_DATE);
@@ -1607,6 +1746,10 @@ function renderSideBtns(box, day){
   if(DAY_MODE==='mark'){
     box.innerHTML = '';
     setTimeout(()=>{
+      const ms = document.getElementById('mark-save');
+      if(ms) ms.onclick = ()=>{
+        DAY_MODE='view'; saveDB(); toast('Отметки сохранены — можно вернуться и доотметить позже'); render();
+      };
       const ca = document.getElementById('mark-cancel-all');
       if(ca) ca.onclick = ()=>{
         [...day.schedule,...day.tasks,...day.habits].forEach(it=>it.mark=null);
@@ -1725,7 +1868,7 @@ function openAddMenu(kind, day, anchor){
     else openPickFromGoals(kind, day);
   });
 }
-function timeFields(id, defTime){
+function timeFields(id, defTime, defDur){
   const times = [];
   for(let h=0;h<24;h++) for(let mm=0;mm<60;mm+=15)
     times.push(String(h).padStart(2,'0')+':'+String(mm).padStart(2,'0'));
@@ -1733,7 +1876,7 @@ function timeFields(id, defTime){
     <div class="field"><label>Время начала</label>
       <select id="${id}-time">${times.map(t=>`<option ${t===(defTime||'09:00')?'selected':''}>${t}</option>`).join('')}</select></div>
     <div class="field"><label>Продолжительность</label>
-      <select id="${id}-dur">${DUR_OPTIONS.map(v=>`<option value="${v}" ${v===60?'selected':''}>${durLabel(v)}</option>`).join('')}</select></div>
+      <select id="${id}-dur">${DUR_OPTIONS.map(v=>`<option value="${v}" ${v===(defDur||60)?'selected':''}>${durLabel(v)}</option>`).join('')}</select></div>
   </div>`;
 }
 function openManualAdd(kind, day){
@@ -1798,17 +1941,18 @@ function bindPickExtras(box, picked){
 function distributePicked(picked, day){
   let added = 0, skipped = 0;
   picked.forEach(p=>{
+    const pImgs = p.imgs && p.imgs.length ? p.imgs.slice() : (p.img? [p.img]:[]);
     if(p.type==='habit'){
-      if(day.habits.length>=6 || (p.habitId && day.habits.some(x=>x.habitId===p.habitId))){ skipped++; return; }
-      day.habits.push({id:uid(), name:p.name, habitId:p.habitId||null, sphereId:p.sphereId||null, goalId:p.goalId||null, img:p.img||null, mark:null});
+      if(day.habits.length>=10 || (p.habitId && day.habits.some(x=>x.habitId===p.habitId))){ skipped++; return; }
+      day.habits.push({id:uid(), name:p.name, habitId:p.habitId||null, sphereId:p.sphereId||null, goalId:p.goalId||null, img:pImgs[0]||null, imgs:pImgs, mark:null});
       added++;
     } else if(p.time){
       if(day.schedule.length>=8){ skipped++; return; }
-      day.schedule.push({id:uid(), name:p.name, time:p.time, dur:p.dur||60, sphereId:p.sphereId||null, goalId:p.goalId||null, goalTaskId:p.goalTaskId||null, img:p.img||null, mark:null});
+      day.schedule.push({id:uid(), name:p.name, time:p.time, dur:p.dur||60, sphereId:p.sphereId||null, goalId:p.goalId||null, goalTaskId:p.goalTaskId||null, img:pImgs[0]||null, imgs:pImgs, mark:null});
       added++;
     } else {
       if(day.tasks.length>=8){ skipped++; return; }
-      day.tasks.push({id:uid(), name:p.name, sphereId:p.sphereId||null, goalId:p.goalId||null, goalTaskId:p.goalTaskId||null, img:p.img||null, mark:null});
+      day.tasks.push({id:uid(), name:p.name, sphereId:p.sphereId||null, goalId:p.goalId||null, goalTaskId:p.goalTaskId||null, img:pImgs[0]||null, imgs:pImgs, mark:null});
       added++;
     }
   });
@@ -1855,8 +1999,8 @@ function openPickFromSpheres(kind, day){
       if(cb.checked){
         const o = isHabit ? s.habits.find(x=>x.id===id) : s.tasks.find(x=>x.id===id);
         picked.set(id, isHabit
-          ? {type:'habit', name:o.name, habitId:o.id, sphereId:s.id, img:o.img||null}
-          : {type:'task', name:o.name, sphereId:s.id, img:o.img||null, time:defTime||null, dur:60});
+          ? {type:'habit', name:o.name, habitId:o.id, sphereId:s.id, img:o.img||null, imgs:imgsOf(o)}
+          : {type:'task', name:o.name, sphereId:s.id, img:o.img||null, imgs:imgsOf(o), time:defTime||null, dur:60});
         if(extra) extra.style.display = '';
       } else {
         picked.delete(id);
@@ -2073,17 +2217,19 @@ function renderSpheresTab(c){
 function renderSpherePanel(panel){
   const s = sphereOf(SEL_SPHERE);
   if(!s){ panel.innerHTML = '<div class="card"><p class="empty-note">Создай свою первую сферу жизни ✨</p></div>'; return; }
-  const itemRow = (it, kind) => `
+  const itemRow = (it, kind) => {
+    const imgs = imgsOf(it);
+    return `
     <div class="item-card" style="--sphere-color:${s.color}">
-      ${it.img? `<img class="thumb" src="${it.img.startsWith('data:')?it.img:'images/'+it.img}" alt="" onerror="this.remove()">`:''}
+      ${imgs.length? `<span class="thumb-wrap"><img class="thumb" src="${srcOf(imgs[0])}" data-gal="${kind}:${it.id}" alt="" onerror="this.parentNode.remove()">${imgs.length>1?`<span class="thumb-count">+${imgs.length-1}</span>`:''}</span>`:''}
       <span class="title">${esc(it.name)}</span>
       <span class="marks">
         ${kind==='habit'? `<button class="iconbtn" data-stat="${it.id}" title="Статистика привычки">${ICONS.target}</button>`:''}
-        <button class="iconbtn" data-cam="${kind}:${it.id}" title="${it.img?'Заменить картинку':'Добавить картинку'}">${ICONS.camera}</button>
+        <button class="iconbtn" data-cam="${kind}:${it.id}" title="Картинки (до 5)">${ICONS.camera}</button>
         <button class="iconbtn" data-ed="${kind}:${it.id}" title="Переименовать">${ICONS.pencil}</button>
         <button class="iconbtn" data-rm="${kind}:${it.id}" title="Удалить">${ICONS.trash}</button>
       </span>
-    </div>`;
+    </div>`;};
   panel.innerHTML = `
     <div class="card">
       <div class="flex wrap mb">
@@ -2128,15 +2274,15 @@ function renderSpherePanel(panel){
       list.splice(list.indexOf(it),1); saveDB(); render();
     }
   });
+  panel.querySelectorAll('[data-gal]').forEach(im=>im.onclick = ()=>{
+    const [kind,id] = im.dataset.gal.split(':');
+    const it = (kind==='task'? s.tasks : s.habits).find(x=>x.id===id);
+    openGallery(it, false);
+  });
   panel.querySelectorAll('[data-cam]').forEach(b=>b.onclick = ()=>{
     const [kind,id] = b.dataset.cam.split(':');
     const it = (kind==='task'? s.tasks : s.habits).find(x=>x.id===id);
-    const inp = document.createElement('input'); inp.type='file'; inp.accept='image/*';
-    inp.onchange = async ()=>{
-      try{ it.img = await compressImage(inp.files[0]); saveDB(); render(); }
-      catch(e){ toast(STRINGS.storageFull); }
-    };
-    inp.click();
+    openImagesEdit(it);
   });
   panel.querySelectorAll('[data-stat]').forEach(b=>b.onclick = ()=>{
     const h = s.habits.find(x=>x.id===b.dataset.stat);
@@ -2264,14 +2410,17 @@ function fillGoalBody(body, g){
   const statusBtns = isDone
     ? `<button class="btn small secondary" disabled data-hint="Эта цель завершена! Создай новую цель." data-click="1">В работу</button>`
     : stKeys.filter(k=>k!==g.status).map(k=>`<button class="btn small ${k==='done'?'':'secondary'}" data-st="${k}">${stLabels[k]}</button>`).join('');
+  const gImgs = imgsOf(g);
   body.innerHTML = `
     <p class="mt" style="font-family:'Caveat';font-size:24px;color:var(--accent-dark)">${esc(GOAL_STATUS[g.status].phrase)}</p>
-    ${g.img? `<div class="mt" style="max-width:340px;border-radius:12px;overflow:hidden"><img src="${g.img}" style="width:100%;display:block" alt=""></div>`:''}
+    ${gImgs.length? `<div class="mt" style="max-width:340px;border-radius:12px;overflow:hidden;position:relative;cursor:pointer" id="gb-gal" title="Открыть картинки">
+      <img src="${srcOf(gImgs[0])}" style="width:100%;display:block" alt="">
+      ${gImgs.length>1? `<span class="thumb-count" style="right:8px;bottom:8px">+${gImgs.length-1}</span>`:''}</div>`:''}
     <div class="flex wrap mt">
       ${statusBtns}
       <button class="btn small ${savedG?'secondary':''}" id="gb-diary" ${savedG?'disabled data-hint="Прогресс с этим статусом уже в дневнике" data-click="1"':''}>${savedG?'В дневнике ✓':'📖 Сохранить прогресс в дневник'}</button>
       <span class="right flex" style="gap:6px">
-        <button class="iconbtn" id="gb-img" title="${g.img?'Заменить картинку':'Добавить картинку мечты'}">${ICONS.camera}</button>
+        <button class="iconbtn" id="gb-img" title="Картинки мечты (до 5)">${ICONS.camera}</button>
         <button class="iconbtn" id="gb-ed" title="Редактировать цель">${ICONS.pencil}</button>
         <button class="iconbtn" id="gb-rm" title="Удалить цель">${ICONS.trash}</button>
       </span>
@@ -2313,14 +2462,9 @@ function fillGoalBody(body, g){
     if(t.done && g.status==='created') g.status = 'active';
     saveDB(); render();
   });
-  body.querySelector('#gb-img').onclick = ()=>{
-    const inp = document.createElement('input'); inp.type='file'; inp.accept='image/*';
-    inp.onchange = async ()=>{
-      try{ g.img = await compressImage(inp.files[0]); saveDB(); render(); }
-      catch(e){ toast(STRINGS.storageFull); }
-    };
-    inp.click();
-  };
+  const gg = body.querySelector('#gb-gal');
+  if(gg) gg.onclick = ()=>openGallery(g, false);
+  body.querySelector('#gb-img').onclick = ()=>openImagesEdit(g, 'Картинки мечты');
   body.querySelector('#gb-ed').onclick = ()=>openGoalEdit(g);
   body.querySelector('#gb-rm').onclick = async ()=>{
     if(await confirmModal(`Удалить цель «${g.title}» насовсем?`, 'Да, удалить')){
@@ -2431,6 +2575,7 @@ function addDiaryEntry(e, silent){
 }
 function diaryEntryHTML(e){
   const del = `<button class="iconbtn diary-del" data-dd="${e.id}" title="Удалить запись">${ICONS.trash}</button>`;
+  const edit = e.type==='free' ? `<button class="iconbtn diary-del" data-de="${e.id}" title="Редактировать запись" style="right:34px">${ICONS.pencil}</button>` : '';
   const head = `<div class="d-date">${fmtDateRu(e.date || ymd(new Date(e.createdAt)))}</div>`;
   let body = '';
   if(e.type==='day'){
@@ -2440,7 +2585,7 @@ function diaryEntryHTML(e){
     body = Object.keys(groups).map(k=>`
       <div class="mt" style="font-size:13px"><b style="font-size:11.5px;letter-spacing:.6px;color:#A395C2">${k}</b>
       ${groups[k].map(i=>`<div>${marks[i.mark]||'▫️'} ${i.time? i.time+' · ':''}${esc(i.name)}</div>`).join('')}</div>`).join('');
-    if(e.payload.note) body += `<div class="freetext mt">${esc(e.payload.note)}</div>`;
+    if(e.payload.note) body += `<div class="freetext mt">${linkify(e.payload.note)}</div>`;
   }
   else if(e.type==='goal') body = `<div style="font-weight:800;color:var(--accent-dark)">🏆 ${esc(e.payload.title)}</div>`;
   else if(e.type==='ach'){
@@ -2451,8 +2596,8 @@ function diaryEntryHTML(e){
     body = `<div style="font-weight:800;color:var(--accent-dark)">${esc(e.payload.name)}</div>
       ${e.payload.img? `<div class="mt" style="border-radius:10px;overflow:hidden;aspect-ratio:4/3">${imgHTML(e.payload.img,'')}</div>`:''}`;
   }
-  else body = `<div class="freetext">${esc(e.payload.text||'')}</div>`;
-  return `<div class="diary-entry">${del}${head}<div class="phrase">${esc(e.phrase||'')}</div>${body}</div>`;
+  else body = `<div class="freetext">${linkify(e.payload.text||'')}</div>`;
+  return `<div class="diary-entry">${del}${edit}${head}<div class="phrase">${esc(e.phrase||'')}</div>${body}</div>`;
 }
 function renderDiaryTab(c){
   const spreads = Math.max(1, Math.ceil(P.diary.length / (DIARY_PER_PAGE*2)));
@@ -2482,7 +2627,7 @@ function renderDiaryTab(c){
   c.querySelector('#dy-next').onclick = ()=>{ if(DIARY_PAGE<spreads-1){ DIARY_PAGE++; render(); } };
   c.querySelector('#dy-new').onclick = ()=>{
     const m = openModal(`<h3 class="mb">Новая запись</h3>
-      <div class="field"><textarea id="dy-text" maxlength="2000" rows="6" placeholder="Сегодня случилось чудесное…"></textarea></div>
+      <div class="field"><textarea id="dy-text" maxlength="2000" rows="6" placeholder="Сегодня случилось чудесное… Ссылки станут кликабельными."></textarea></div>
       <div style="text-align:right"><button class="btn" id="dy-save">Сохранить в дневник</button></div>`);
     m.root.querySelector('#dy-save').onclick = ()=>{
       const text = m.root.querySelector('#dy-text').value.trim();
@@ -2491,6 +2636,19 @@ function renderDiaryTab(c){
       m.close(); render();
     };
   };
+  c.querySelectorAll('[data-de]').forEach(b=>b.onclick = ()=>{
+    const e = P.diary.find(x=>x.id===b.dataset.de);
+    if(!e) return;
+    const m = openModal(`<h3 class="mb">Редактировать запись</h3>
+      <div class="field"><textarea id="dy-text" maxlength="2000" rows="6">${esc(e.payload.text||'')}</textarea></div>
+      <div style="text-align:right"><button class="btn" id="dy-save">Сохранить</button></div>`);
+    m.root.querySelector('#dy-save').onclick = ()=>{
+      const text = m.root.querySelector('#dy-text').value.trim();
+      if(!text){ toast('Запись пустая'); return; }
+      e.payload.text = text;
+      saveDB(); m.close(); render();
+    };
+  });
   c.querySelectorAll('[data-dd]').forEach(b=>b.onclick = async ()=>{
     if(!(await confirmModal('Удалить запись из дневника?', 'Да, удалить'))) return;
     const i = P.diary.findIndex(x=>x.id===b.dataset.dd);
