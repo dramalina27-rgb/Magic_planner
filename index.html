@@ -1747,7 +1747,11 @@ function imgsOf(it){
   return it.img ? [it.img] : [];
 }
 function srcOf(im){ return im.startsWith('data:')? im : 'images/'+im; }
-function syncImg(it){ it.imgs = imgsOf(it); it.img = it.imgs[0] || null; }
+function syncImg(it){
+  // массив imgs — главный источник; поле img держим только как «первую картинку» для совместимости
+  if(!Array.isArray(it.imgs)) it.imgs = it.img ? [it.img] : [];
+  it.img = it.imgs[0] || null;
+}
 function openGallery(it, readOnly){
   const imgs = imgsOf(it);
   if(!imgs.length) return;
@@ -1810,6 +1814,33 @@ function openImagesEdit(it, title){
 }
 /* обратная совместимость со старыми вызовами */
 function openImageView(it, readOnly){ openGallery(it, readOnly); }
+/* встраиваемый мини-редактор картинок (для записей дневника): до 5 штук, без подтверждений */
+function bindInlineImgPicker(root, obj){
+  if(!Array.isArray(obj.imgs)) obj.imgs = [];
+  const box = root.querySelector('.inl-imgs'), addBtn = root.querySelector('.inl-addimg');
+  const draw = ()=>{
+    box.innerHTML = obj.imgs.map((im,i)=>`<span style="position:relative;display:inline-block">
+      <img src="${srcOf(im)}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:10px;box-shadow:var(--shadow)">
+      <button class="iconbtn" data-inlrm="${i}" title="Удалить" style="position:absolute;top:0;right:0;background:#fff;border-radius:50%;padding:4px">${ICONS.trash}</button>
+    </span>`).join('');
+    addBtn.style.display = obj.imgs.length>=5 ? 'none' : '';
+    box.querySelectorAll('[data-inlrm]').forEach(b=>b.onclick = ()=>{ obj.imgs.splice(+b.dataset.inlrm, 1); draw(); });
+  };
+  draw();
+  addBtn.onclick = ()=>{
+    const inp = document.createElement('input'); inp.type='file'; inp.accept='image/*';
+    inp.onchange = async ()=>{
+      try{ obj.imgs.push(await compressImage(inp.files[0])); draw(); }
+      catch(e){ toast(STRINGS.storageFull); }
+    };
+    inp.click();
+  };
+}
+function inlPickerHTML(){
+  return `<div class="field"><label>Картинки (до 5)</label>
+    <div class="inl-imgs flex wrap" style="gap:8px"></div>
+    <button class="btn secondary small inl-addimg" style="margin-top:6px">${ICONS.plus} Добавить картинку</button></div>`;
+}
 function legendHTML(day){
   return `<div class="day-block legend" style="margin-top:12px">
     <div class="row"><span class="dot mark-done">${MARK_SYMBOLS.done}</span> выполнено</div>
@@ -2694,7 +2725,9 @@ function diaryEntryHTML(e){
     body = `<div style="font-weight:800;color:var(--accent-dark)">${esc(e.payload.name)}</div>
       ${e.payload.img? `<div class="mt" style="border-radius:10px;overflow:hidden;aspect-ratio:4/3">${imgHTML(e.payload.img,'')}</div>`:''}`;
   }
-  else body = `<div class="freetext">${linkify(e.payload.text||'')}</div>`;
+  else body = `<div class="freetext">${linkify(e.payload.text||'')}</div>
+    ${(e.payload.imgs||[]).length? `<div class="flex wrap mt" style="gap:6px">${e.payload.imgs.map((im,i)=>
+      `<span class="thumb-wrap"><img src="${srcOf(im)}" data-dgal="${e.id}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:10px;cursor:pointer;box-shadow:var(--shadow)">${i===0 && e.payload.imgs.length>1?`<span class="thumb-count">+${e.payload.imgs.length-1}</span>`:''}</span>`).join('')}</div>`:''}`;
   return `<div class="diary-entry">${del}${edit}${head}<div class="phrase">${esc(e.phrase||'')}</div>${body}</div>`;
 }
 function renderDiaryTab(c){
@@ -2724,28 +2757,39 @@ function renderDiaryTab(c){
   c.querySelector('#dy-prev').onclick = ()=>{ if(DIARY_PAGE>0){ DIARY_PAGE--; render(); } };
   c.querySelector('#dy-next').onclick = ()=>{ if(DIARY_PAGE<spreads-1){ DIARY_PAGE++; render(); } };
   c.querySelector('#dy-new').onclick = ()=>{
+    const tmp = {imgs:[]};
     const m = openModal(`<h3 class="mb">Новая запись</h3>
       <div class="field"><textarea id="dy-text" maxlength="2000" rows="6" placeholder="Сегодня случилось чудесное… Ссылки станут кликабельными."></textarea></div>
+      ${inlPickerHTML()}
       <div style="text-align:right"><button class="btn" id="dy-save">Сохранить в дневник</button></div>`);
+    bindInlineImgPicker(m.root, tmp);
     m.root.querySelector('#dy-save').onclick = ()=>{
       const text = m.root.querySelector('#dy-text').value.trim();
-      if(!text){ toast('Запись пустая'); return; }
-      addDiaryEntry({type:'free', key:null, phrase:'', date:todayYmd(), payload:{text}});
+      if(!text && !tmp.imgs.length){ toast('Запись пустая'); return; }
+      addDiaryEntry({type:'free', key:null, phrase:'', date:todayYmd(), payload:{text, imgs:tmp.imgs}});
       m.close(); render();
     };
   };
   c.querySelectorAll('[data-de]').forEach(b=>b.onclick = ()=>{
     const e = P.diary.find(x=>x.id===b.dataset.de);
     if(!e) return;
+    const tmp = {imgs:(e.payload.imgs||[]).slice()};
     const m = openModal(`<h3 class="mb">Редактировать запись</h3>
       <div class="field"><textarea id="dy-text" maxlength="2000" rows="6">${esc(e.payload.text||'')}</textarea></div>
+      ${inlPickerHTML()}
       <div style="text-align:right"><button class="btn" id="dy-save">Сохранить</button></div>`);
+    bindInlineImgPicker(m.root, tmp);
     m.root.querySelector('#dy-save').onclick = ()=>{
       const text = m.root.querySelector('#dy-text').value.trim();
-      if(!text){ toast('Запись пустая'); return; }
+      if(!text && !tmp.imgs.length){ toast('Запись пустая'); return; }
       e.payload.text = text;
+      e.payload.imgs = tmp.imgs;
       saveDB(); m.close(); render();
     };
+  });
+  c.querySelectorAll('[data-dgal]').forEach(im=>im.onclick = ()=>{
+    const e = P.diary.find(x=>x.id===im.dataset.dgal);
+    if(e) openGallery({name:'Моя запись', imgs:e.payload.imgs||[]}, true);
   });
   c.querySelectorAll('[data-dd]').forEach(b=>b.onclick = async ()=>{
     if(!(await confirmModal('Удалить запись из дневника?', 'Да, удалить'))) return;
