@@ -502,40 +502,29 @@ const DIARY_PHRASES = {
 };
 /* Дефолтные сферы (раздел 9.2) */
 const DEFAULT_SPHERES = [
-  {name:'Работа', habits:[
-    {name:'Статус в 10:30'}],
-   tasks:[
-    {name:'Работа по Мультибуку'},
-    {name:'Перенести отпуск'},{name:'Зайти в кадры'}]},
+  {name:'Работа', habits:[], tasks:[
+    {name:'Зайти в кадры'}]},
   {name:'Уход и здоровье', habits:[{name:'Уход за кожей'},{name:'Уход за зубами'}],
    tasks:[
-    {name:'Запись по родинкам'},{name:'Приём по родинкам'},{name:'Сдать кровь'},
     {name:'Маникюр', img:'task_care_manicure.png'},{name:'Педикюр', img:'task_care_pedicure.png'},
-    {name:'Эпиляция'},{name:'Брови'},
-    {name:'Массаж', img:'task_care_massage.png'},{name:'Запись на чистку зубов'},{name:'Сделать чистку зубов'}]},
+    {name:'Эпиляция'},
+    {name:'Массаж', img:'task_care_massage.png'}]},
   {name:'Активность и питание', habits:[
-    {name:'12к шагов'},{name:'Без еды после 18:00'},
-    {name:'Есть овощи', img:'habit_food_veggies.png'},{name:'Без доставки'}],
+    {name:'12к шагов'}],
    tasks:[
     {name:'Бассейн', img:'task_active_pool.png'},
-    {name:'Прогулка в парке рядом (озеро, у сестры, Поклонка)', img:'task_active_park.png'},
-    {name:'Царицыно или Коломенское'},{name:'Участие в забеге', img:'task_active_race.png'}]},
+    {name:'Участие в забеге', img:'task_active_race.png'}]},
   {name:'Рисование', habits:[], tasks:[
-    {name:'Делать сайт'},{name:'Пост в группу'},
-    {name:'Рисовать акрилом', img:'task_art_acrylic.png'},
-    {name:'Таймлапс с рисованием — выложить'}]},
+    {name:'Рисовать акрилом', img:'task_art_acrylic.png'}]},
   {name:'Быт', habits:[], tasks:[
     {name:'Уборка дома', img:'task_home_laundry.png'},{name:'Сменить постель'},
-    {name:'Разобрать книги'},{name:'Разбирать шкаф'},{name:'Разобрать вещи на полу, рисование'},
-    {name:'Приклеить плинтуса'},{name:'Заказать вещи для дома'}]},
+    {name:'Разобрать книги'},{name:'Заказать вещи для дома'}]},
   {name:'Игровое и досуг', habits:[{name:'Писать в дневник', img:'habit_fun_journal.png'}], tasks:[
-    {name:'Доделать тест-опрос'},
-    {name:'Симс', img:'task_fun_sims.png'},{name:'Сходить в кино', img:'task_fun_cinema.png'},
-    {name:'Сходить в театр'},{name:'Слушать книгу «Чужестранка»'},
+    {name:'Сходить в кино', img:'task_fun_cinema.png'},
+    {name:'Сходить в театр'},
     {name:'С подругами', img:'task_fun_friends.png'},
     {name:'Забронировать путешествие'}]},
-  {name:'Блог', habits:[], tasks:[
-    {name:'Редактировать план контента'}]},
+  {name:'Блог', habits:[], tasks:[]},
 ];
 /* Костюмы (12.2) */
 const COSTUMES = [
@@ -701,15 +690,59 @@ function newProfile(name){
   return {
     id:uid(), name, createdAt:Date.now(), lastLoginAt:Date.now(),
     settings:{theme:'lavender', weekStart:1, focus:null, focusUntil:null, music:false, quizDone:false},
+    passHash:null, passSalt:null,   // необязательный пароль аккаунта
     coins:100, days:{}, spheres, archive:[], goals:[], diary:[],
     purchases:{costumes:[0], activeCostume:0, house:{}, events:[], travels:[]},
     achievements:{}, savedKeys:{},
     onboarding:{done:false, popupShown:false, tasks:{}},
   };
 }
+/* Пароль аккаунта: храним только хеш (SHA-256 с солью; на очень старых
+   браузерах — упрощённый фолбэк). Пароль переезжает вместе с экспортом данных. */
+async function hashPass(pass, salt){
+  const data = salt + '::' + pass;
+  try{
+    if(crypto && crypto.subtle){
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
+      return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    }
+  }catch(e){}
+  let h1 = 0x811c9dc5, h2 = 0x01000193;
+  for(const ch of data){ const cd = ch.codePointAt(0); h1 = ((h1 ^ cd) * 16777619) >>> 0; h2 = ((h2 + cd) * 31 + 7) >>> 0; }
+  return 'f' + h1.toString(16) + h2.toString(16);
+}
+async function setProfilePass(p, pass){
+  if(!pass){ p.passHash = null; p.passSalt = null; }
+  else { p.passSalt = uid(); p.passHash = await hashPass(pass, p.passSalt); }
+  saveDB();
+}
+async function checkProfilePass(p, pass){
+  if(!p.passHash) return true;
+  return (await hashPass(pass, p.passSalt)) === p.passHash;
+}
+/* окно ввода пароля при входе в защищённый профиль */
+function askProfilePass(p){
+  return new Promise(res=>{
+    let done = false;
+    const m = openModal(`<h3 class="mb">🔒 Профиль защищён паролем</h3>
+      <div class="field"><label>Пароль для «${esc(p.name)}»</label><input id="pp-pass" type="password" maxlength="40"></div>
+      <p id="pp-err" style="color:var(--fail);font-weight:700;font-size:13.5px;display:none">Неверный пароль</p>
+      <div style="text-align:right"><button class="btn" id="pp-ok">Войти</button></div>`,
+      {onClose:()=>{ if(!done){ done = true; res(false); } }});
+    const inp = m.root.querySelector('#pp-pass');
+    inp.focus();
+    const submit = async ()=>{
+      if(await checkProfilePass(p, inp.value)){ done = true; m.close(); res(true); }
+      else { m.root.querySelector('#pp-err').style.display = ''; inp.select(); }
+    };
+    m.root.querySelector('#pp-ok').onclick = submit;
+    inp.onkeydown = e=>{ if(e.key==='Enter') submit(); };
+  });
+}
 function resetProfileData(p){
   const fresh = newProfile(p.name);
-  Object.assign(p, fresh, {id:p.id, name:p.name, createdAt:p.createdAt, lastLoginAt:Date.now(), settings:p.settings});
+  Object.assign(p, fresh, {id:p.id, name:p.name, createdAt:p.createdAt, lastLoginAt:Date.now(),
+    settings:p.settings, passHash:p.passHash, passSalt:p.passSalt});
 }
 function applyTheme(){ document.body.dataset.theme = (P && P.settings.theme) || 'lavender'; }
 
@@ -1191,6 +1224,7 @@ function renderLanding(){
           <button class="btn big" id="go-plan">Планировать</button>
           <button class="btn secondary" id="btn-logout">Выйти</button>
           <button class="btn secondary" id="btn-reset">Обнулить аккаунт</button>
+          <button class="btn secondary" id="btn-delete" style="color:var(--fail);border-color:var(--fail)">Удалить аккаунт</button>
         </div>
         <div class="flex wrap" style="justify-content:center">
           <a class="btn secondary" href="https://t.me/tvorchestvo_alisha_mary" target="_blank" rel="noopener">✈️ Телеграм</a>
@@ -1215,6 +1249,15 @@ function renderLanding(){
     $('#btn-reset').onclick = async ()=>{
       if(await confirmModal(STRINGS.resetConfirm)){ resetProfileData(P); saveDB(); toast('Аккаунт обнулён'); render(); }
     };
+    $('#btn-delete').onclick = async ()=>{
+      if(P.passHash && !(await askProfilePass(P))) return;
+      if(!(await confirmModal(`Удалить аккаунт «${P.name}» НАВСЕГДА? Все дни, цели, дневник и покупки будут стёрты без возможности восстановления. Если хочешь сохранить копию — сначала сделай «Экспорт данных» в настройках.`, 'Да, удалить навсегда'))) return;
+      DB.profiles = DB.profiles.filter(p=>p.id!==P.id);
+      P = null;
+      persistSession();
+      toast('Аккаунт удалён');
+      render();
+    };
   } else $('#btn-login').onclick = openProfilePicker;
   $('#btn-question').onclick = openQuestionModal;
   $('#admin-login').onclick = openAdminLogin;
@@ -1225,20 +1268,27 @@ function openProfilePicker(){
     <hr class="hr">
     <div class="field"><label>Создать новый</label>
       <div class="flex"><input id="new-prof-name" maxlength="20" placeholder="Твоё имя" style="flex:1">
-      <button class="btn" id="create-prof">Создать</button></div></div>`);
+      <button class="btn" id="create-prof">Создать</button></div>
+      <input id="new-prof-pass" type="password" maxlength="40" placeholder="Пароль (необязательно)" style="margin-top:8px">
+      <p class="muted" style="font-size:12.5px;margin-top:6px">С паролем профиль на этом устройстве смогут открыть только те, кто его знает. Пароль сохранится и в файле экспорта.</p></div>`);
   const list = m.root.querySelector('#prof-list');
   list.innerHTML = DB.profiles.length ? DB.profiles.map(p=>`
-    <button class="choice-btn" data-id="${p.id}">🌸 ${esc(p.name)} <span class="muted" style="font-weight:400">· монет: ${p.coins}</span></button>`).join('')
+    <button class="choice-btn" data-id="${p.id}">🌸 ${esc(p.name)} ${p.passHash?'🔒':''} <span class="muted" style="font-weight:400">· монет: ${p.coins}</span></button>`).join('')
     : `<p class="muted">Профилей пока нет — создай первый!</p>`;
-  list.querySelectorAll('.choice-btn').forEach(b=>b.onclick = ()=>{
-    P = DB.profiles.find(p=>p.id===b.dataset.id);
+  list.querySelectorAll('.choice-btn').forEach(b=>b.onclick = async ()=>{
+    const pf = DB.profiles.find(p=>p.id===b.dataset.id);
+    if(pf.passHash && !(await askProfilePass(pf))) return;
+    P = pf;
     P.lastLoginAt = Date.now(); persistSession(); m.close();
     if(!P.settings.quizDone) openQuiz(); else render();
   });
-  m.root.querySelector('#create-prof').onclick = ()=>{
+  m.root.querySelector('#create-prof').onclick = async ()=>{
     const name = m.root.querySelector('#new-prof-name').value.trim();
     if(!name) return;
-    P = newProfile(name); DB.profiles.push(P); persistSession();
+    const pass = m.root.querySelector('#new-prof-pass').value;
+    P = newProfile(name);
+    if(pass) await setProfilePass(P, pass);
+    DB.profiles.push(P); persistSession();
     m.close(); openQuiz();
   };
 }
@@ -1378,7 +1428,7 @@ function preloadImages(){
   DEFAULT_SPHERES.forEach(s=>[...s.tasks, ...s.habits].forEach(it=>{ if(it.img) L.push(it.img); }));
   COSTUMES.forEach(cs=>L.push(`char_costume_${pad2(cs.id)}.png`));
   HOUSE_ROOMS.forEach(r=>{ for(let l=0;l<=r.upgrades.length;l++) L.push(`${r.file}_lvl${l}.png`); });
-  EVENTS.forEach(ev=>L.push(`event_${pad2(ev.id)}.png`));
+  EVENTS.forEach(ev=>L.push(`event_${pad2(ev.id)}_1.png`));
   TRAVELS.forEach(t=>{ for(let g=1;g<=3;g++) L.push(`travel_${pad2(t.id)}_${g}.png`); });
   ['winter','spring','summer','autumn'].forEach(sn=>{
     ['spheres','goals'].forEach(p=>{ L.push(`${p}_side_${sn}.png`); L.push(`${p}_side_${sn}_wide.png`); });
@@ -1430,12 +1480,14 @@ function openSettings(){
   const m = openModal(`<h3 class="mb">Настройки профиля</h3>
     <div class="flex wrap" style="flex-direction:column;align-items:stretch;gap:10px">
       <button class="btn secondary" id="st-quiz">${ICONS.gear} Пройти тест-настройку заново</button>
+      <button class="btn secondary" id="st-pass">🔒 ${P.passHash?'Сменить или убрать пароль':'Установить пароль'}</button>
       <button class="btn secondary" id="st-export">${ICONS.export} Экспорт данных</button>
       <button class="btn secondary" id="st-import">${ICONS.import} Импорт данных</button>
       <input type="file" id="st-file" accept="application/json" style="display:none">
     </div>
-    <p class="muted mt">Экспорт — резервная копия: localStorage живёт только в этом браузере и пропадёт при чистке кэша или смене устройства.</p>`);
+    <p class="muted mt">Экспорт — резервная копия и способ перенести дневник на другое устройство: скачай файл здесь и импортируй его там. Пароль аккаунта переезжает вместе с файлом.</p>`);
   m.root.querySelector('#st-quiz').onclick = ()=>{ m.close(); openQuiz(true); };
+  m.root.querySelector('#st-pass').onclick = ()=>{ m.close(); openPassSettings(); };
   m.root.querySelector('#st-export').onclick = ()=>{
     const blob = new Blob([JSON.stringify(P, null, 2)], {type:'application/json'});
     const a = document.createElement('a');
@@ -1458,6 +1510,27 @@ function openSettings(){
       }catch(e){ toast('Не получилось прочитать файл'); }
     };
     rd.readAsText(f);
+  };
+}
+/* установка / смена / удаление пароля аккаунта */
+function openPassSettings(){
+  const has = !!P.passHash;
+  const m = openModal(`<h3 class="mb">🔒 Пароль аккаунта</h3>
+    ${has? `<div class="field"><label>Текущий пароль</label><input id="ps-old" type="password" maxlength="40"></div>`:''}
+    <div class="field"><label>Новый пароль ${has?'(пусто — убрать пароль)':''}</label><input id="ps-new" type="password" maxlength="40"></div>
+    <div class="field"><label>Повтори новый пароль</label><input id="ps-new2" type="password" maxlength="40"></div>
+    <p id="ps-err" style="color:var(--fail);font-weight:700;font-size:13.5px;display:none"></p>
+    <p class="muted" style="font-size:13px">Пароль защищает вход в профиль на этом устройстве и сохраняется в файле экспорта.</p>
+    <div style="text-align:right" class="mt"><button class="btn" id="ps-save">Сохранить</button></div>`);
+  const $ = s=>m.root.querySelector(s);
+  const err = t=>{ const e=$('#ps-err'); e.textContent=t; e.style.display=''; };
+  $('#ps-save').onclick = async ()=>{
+    if(has && !(await checkProfilePass(P, $('#ps-old').value))) return err('Неверный текущий пароль');
+    const p1 = $('#ps-new').value, p2 = $('#ps-new2').value;
+    if(p1 !== p2) return err('Новые пароли не совпадают');
+    await setProfilePass(P, p1);
+    m.close();
+    toast(p1? '🔒 Пароль установлен' : 'Пароль убран');
   };
 }
 
@@ -2841,7 +2914,21 @@ function renderHouseSub(body){
 }
 /* ---- Досуг ---- */
 function leisureImg(kind, id, gi){
-  return kind==='events' ? `images/event_${pad2(id)}.png` : `images/travel_${pad2(id)}_${gi||1}.png`;
+  return kind==='events' ? `images/event_${pad2(id)}_${gi||1}.png` : `images/travel_${pad2(id)}_${gi||1}.png`;
+}
+/* У мероприятий может быть 1–3 картинки — сколько автор загрузила на GitHub.
+   Проверяем наличие event_XX_2.png / event_XX_3.png на лету. */
+function probeLeisureImgs(kind, id, cb){
+  if(kind==='travels'){ cb([1,2,3]); return; }
+  const avail = [1];
+  let pending = 2;
+  const finish = ()=>{ if(--pending===0) cb(avail.sort((a,b)=>a-b)); };
+  [2,3].forEach(n=>{
+    const im = new Image();
+    im.onload = ()=>{ avail.push(n); finish(); };
+    im.onerror = finish;
+    im.src = leisureImg(kind, id, n);
+  });
 }
 function renderLeisureSub(body){
   const section = (title, items, kind) => `
@@ -2868,7 +2955,7 @@ function openLeisure(kind, id){
   const prefix = kind.slice(0,-1);
   const needCostume = ev.costume!==undefined && !ownsCostume(ev.costume);
   const costumeName = ev.costume!==undefined ? COSTUMES.find(x=>x.id===ev.costume).name : '';
-  const gallery = owned && kind==='travels'; // листалка из 3 картинок — только у купленных путешествий
+  let avail = [1];         // доступные картинки: у путешествий всегда 3, у мероприятий — сколько загружено
   let gi = 1;
   const lKey = kind+':'+id;
   const savedL = !!P.savedKeys[lKey];
@@ -2876,7 +2963,7 @@ function openLeisure(kind, id){
     <div id="lz-img" class="${owned?'':'img-blur'}" style="border-radius:14px;overflow:hidden;height:min(300px,36vh);margin-bottom:8px;position:relative">
       ${owned? '' : `<span class="lock-badge" style="width:44px;height:44px;top:auto;right:auto;left:50%;bottom:50%;transform:translate(-50%,50%);z-index:3">${ICONS.lock}</span>`}
     </div>
-    ${gallery? `<div class="gallery-dots" id="lz-dots">${[1,2,3].map(i=>`<span data-g="${i}" class="${i===1?'on':''}"></span>`).join('')}</div>`:''}
+    <div class="gallery-dots" id="lz-dots"></div>
     <h3 class="mt">${esc(ev.name)}</h3>
     <p class="muted mt" style="font-size:14.5px">${owned? esc(ev.desc) : 'Как всё пройдёт — узнаешь после покупки! ✨'}</p>
     ${ev.costume!==undefined? `<p class="mt" style="font-weight:700;font-size:14px;color:${needCostume?'var(--fail)':'var(--ok)'}">
@@ -2897,7 +2984,14 @@ function openLeisure(kind, id){
     m.root.querySelectorAll('[data-g]').forEach(d=>d.classList.toggle('on', +d.dataset.g===gi));
   };
   drawImg();
-  m.root.querySelectorAll('[data-g]').forEach(d=>d.onclick = ()=>{ gi = +d.dataset.g; drawImg(); });
+  // листалка появляется только у купленного и только если картинок больше одной
+  if(owned) probeLeisureImgs(kind, ev.id, list=>{
+    avail = list;
+    const dots = m.root.querySelector('#lz-dots');
+    if(!dots || avail.length<2) return;
+    dots.innerHTML = avail.map(i=>`<span data-g="${i}" class="${i===gi?'on':''}"></span>`).join('');
+    m.root.querySelectorAll('[data-g]').forEach(d=>d.onclick = ()=>{ gi = +d.dataset.g; drawImg(); });
+  });
   const ld = m.root.querySelector('#lz-diary');
   if(ld && !ld.disabled) ld.onclick = ()=>{
     addDiaryEntry({type:prefix, key:lKey, phrase:kind==='events'? DIARY_PHRASES.event : DIARY_PHRASES.travel,
