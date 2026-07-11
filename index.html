@@ -447,6 +447,18 @@ textarea{resize:vertical; min-height:90px; width:100%;}
   *,*::before,*::after{animation-duration:.01ms !important; transition-duration:.01ms !important;}
 }
 </style>
+<!-- Yandex.Metrika counter -->
+<script type="text/javascript">
+    (function(m,e,t,r,i,k,a){
+        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+        m[i].l=1*new Date();
+        for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+    })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=110599936', 'ym');
+    ym(110599936, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+</script>
+<noscript><div><img src="https://mc.yandex.ru/watch/110599936" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+<!-- /Yandex.Metrika counter -->
 </head>
 <body data-theme="lavender">
 <div id="app-root"></div>
@@ -455,6 +467,12 @@ textarea{resize:vertical; min-height:90px; width:100%;}
 <audio id="bg-audio"></audio>
 <script>
 'use strict';
+/* ================= СТАТИСТИКА (Яндекс.Метрика) ================= */
+function trackGoal(name){
+  try{
+    if(typeof ym === 'function') ym(110599936, 'reachGoal', name);
+  }catch(e){ /* статистика не должна ломать приложение */ }
+}
 /* ================= КОНСТАНТЫ И ДЕФОЛТНЫЕ ДАННЫЕ ================= */
 const LS_KEY = 'magic_diary_v1';
 const ADMIN_PASS = 'Alisha2026';
@@ -1153,6 +1171,7 @@ function renderOnbChecklist(body){
   const fin = body.querySelector('#onb-finish');
   if(all) fin.onclick = ()=>{
     P.onboarding.done = true; saveDB();
+    trackGoal('onboarding_done');
     MODALS.slice().forEach(m=>m._close());
     checkAchievements(); renderFairy();
   };
@@ -1289,6 +1308,7 @@ function openProfilePicker(){
     P = newProfile(name);
     if(pass) await setProfilePass(P, pass);
     DB.profiles.push(P); persistSession();
+    trackGoal('profile_created');
     m.close(); openQuiz();
   };
 }
@@ -1864,6 +1884,7 @@ function completeDay(day){
   addCoins(earned - penalty);
   DAY_MODE = 'view';
   saveDB();
+  trackGoal('day_completed');
   onbComplete(3);
   checkAchievements();
   checkGoalAutoStatuses();
@@ -2201,6 +2222,7 @@ function setGoalStatus(g, status){
   g.status = status;
   if(status==='done'){
     addCoins(100);
+    trackGoal('goal_achieved');
     confetti();
     toast(`Цель «${g.title}» достигнута! Бонус за цель: +100 монет`);
     checkAchievements();
@@ -2631,7 +2653,7 @@ function openGoalEdit(g){
       deadline:m.root.querySelector('#ge-deadline').value || null,
       tasks, habits,
     };
-    if(isNew) P.goals.push({id:uid(), status:'created', createdAt:Date.now(), img:null, ...payload});
+    if(isNew){ P.goals.push({id:uid(), status:'created', createdAt:Date.now(), img:null, ...payload}); trackGoal('goal_created'); }
     else Object.assign(g, payload);
     saveDB(); m.close(); onbComplete(6); render();
   };
@@ -2643,6 +2665,7 @@ function addDiaryEntry(e, silent){
   if(e.key && P.savedKeys[e.key]) return;
   P.diary.push({id:uid(), createdAt:Date.now(), ...e});
   if(e.key) P.savedKeys[e.key] = true;
+  trackGoal('diary_saved');
   DIARY_PAGE = Math.max(0, Math.ceil(P.diary.length / (DIARY_PER_PAGE*2)) - 1);
   saveDB();
   onbComplete(5);
@@ -2838,6 +2861,7 @@ function renderCharSub(body){
     P.purchases.costumes.push(sel.id);
     P.purchases.activeCostume = sel.id;
     saveDB();
+    trackGoal('purchase');
     confetti();
     toast(`Новый образ: «${sel.name}»!`);
     onbComplete(4);
@@ -2899,6 +2923,7 @@ function renderHouseSub(body){
     addCoins(-price);
     apply();
     saveDB();
+    trackGoal('purchase');
     const stage = document.getElementById('room-stage');
     if(stage) stage.classList.add('sparkle-anim');
     confetti();
@@ -3004,6 +3029,7 @@ function openLeisure(kind, id){
     addCoins(-ev.price);
     P.purchases[kind].push(ev.id);
     saveDB();
+    trackGoal('purchase');
     confetti();
     toast(kind==='events'? 'Чудесное событие впереди! 🎉' : 'Чемоданы собраны! ✈️');
     onbComplete(4);
