@@ -1421,15 +1421,25 @@ function renderAdmin(){
       <td><b>${esc(p.name)}</b></td><td>${fmtDT(p.createdAt)}</td><td>${fmtDT(p.lastLoginAt)}</td>
       <td>${p.coins}</td><td>${Object.values(p.days).filter(d=>d.completed).length}</td>
       <td>${!p.passHash ? '<span class="muted">нет</span>'
-          : p.passPlain ? `<span class="adm-pass" data-pw="${esc(p.passPlain)}" style="letter-spacing:2px">••••••</span>
+          : (p.passPlain ? `<span class="adm-pass" data-pw="${esc(p.passPlain)}" style="letter-spacing:2px">••••••</span>
             <button class="btn small secondary" data-eye="${p.id}" title="Показать/скрыть">👁</button>`
-          : '<span class="muted" title="Пароль задан до обновления — попроси пользователя сменить его в настройках, и он появится здесь">установлен</span>'}</td>
+          : '<span class="muted" title="Пароль задан до обновления — его можно только сбросить">установлен</span>')
+          + ` <button class="btn small danger" data-pwreset="${p.id}" title="Снять пароль с профиля">Сбросить</button>`}</td>
       <td class="flex wrap"><button class="btn small" data-ach="${p.id}">Достижения</button>
       <button class="btn small danger" data-del="${p.id}">Удалить профиль</button></td>
     </tr>`).join('') || '<tr><td colspan="7" class="empty-note">Профилей нет</td></tr>'}
     </tbody></table></div>
   </div>`;
   ROOT.querySelector('#adm-exit').onclick = ()=>{ SCREEN='landing'; render(); };
+  ROOT.querySelectorAll('[data-pwreset]').forEach(b=>b.onclick = async ()=>{
+    const p = DB.profiles.find(x=>x.id===b.dataset.pwreset);
+    if(await confirmModal(`Снять пароль с профиля «${p.name}»? Пользователь сможет войти без пароля и задать новый в настройках.`, 'Да, снять пароль')){
+      p.passHash = null; p.passSalt = null; p.passPlain = null;
+      saveDB();
+      toast(`Пароль профиля «${p.name}» сброшен`);
+      render();
+    }
+  });
   ROOT.querySelectorAll('[data-eye]').forEach(b=>b.onclick = ()=>{
     const sp = b.previousElementSibling;
     if(sp.dataset.shown==='1'){
