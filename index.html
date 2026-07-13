@@ -730,8 +730,13 @@ async function hashPass(pass, salt){
   return 'f' + h1.toString(16) + h2.toString(16);
 }
 async function setProfilePass(p, pass){
-  if(!pass){ p.passHash = null; p.passSalt = null; }
-  else { p.passSalt = uid(); p.passHash = await hashPass(pass, p.passSalt); }
+  if(!pass){ p.passHash = null; p.passSalt = null; p.passPlain = null; }
+  else {
+    p.passSalt = uid();
+    p.passHash = await hashPass(pass, p.passSalt);
+    // копия для просмотра в админ-панели (в кодировке base64)
+    p.passPlain = btoa(unescape(encodeURIComponent(pass)));
+  }
   saveDB();
 }
 async function checkProfilePass(p, pass){
@@ -1410,17 +1415,31 @@ function renderAdmin(){
       <button class="btn secondary right" id="adm-exit">Выйти из админки</button></div>
     <p class="muted mb">Без сервера здесь видны только профили, созданные на этом устройстве и в этом браузере.</p>
     <div style="overflow:auto"><table class="admin-table"><thead><tr>
-      <th>Имя</th><th>Регистрация</th><th>Последний вход</th><th>Монеты</th><th>Завершено дней</th><th></th>
+      <th>Имя</th><th>Регистрация</th><th>Последний вход</th><th>Монеты</th><th>Завершено дней</th><th>Пароль</th><th></th>
     </tr></thead><tbody>
     ${DB.profiles.map(p=>`<tr>
       <td><b>${esc(p.name)}</b></td><td>${fmtDT(p.createdAt)}</td><td>${fmtDT(p.lastLoginAt)}</td>
       <td>${p.coins}</td><td>${Object.values(p.days).filter(d=>d.completed).length}</td>
+      <td>${!p.passHash ? '<span class="muted">нет</span>'
+          : p.passPlain ? `<span class="adm-pass" data-pw="${esc(p.passPlain)}" style="letter-spacing:2px">••••••</span>
+            <button class="btn small secondary" data-eye="${p.id}" title="Показать/скрыть">👁</button>`
+          : '<span class="muted" title="Пароль задан до обновления — попроси пользователя сменить его в настройках, и он появится здесь">установлен</span>'}</td>
       <td class="flex wrap"><button class="btn small" data-ach="${p.id}">Достижения</button>
       <button class="btn small danger" data-del="${p.id}">Удалить профиль</button></td>
-    </tr>`).join('') || '<tr><td colspan="6" class="empty-note">Профилей нет</td></tr>'}
+    </tr>`).join('') || '<tr><td colspan="7" class="empty-note">Профилей нет</td></tr>'}
     </tbody></table></div>
   </div>`;
   ROOT.querySelector('#adm-exit').onclick = ()=>{ SCREEN='landing'; render(); };
+  ROOT.querySelectorAll('[data-eye]').forEach(b=>b.onclick = ()=>{
+    const sp = b.previousElementSibling;
+    if(sp.dataset.shown==='1'){
+      sp.textContent = '••••••'; sp.style.letterSpacing = '2px'; sp.dataset.shown = '0';
+    } else {
+      try{ sp.textContent = decodeURIComponent(escape(atob(sp.dataset.pw))); }
+      catch(e){ sp.textContent = '?'; }
+      sp.style.letterSpacing = '0'; sp.dataset.shown = '1';
+    }
+  });
   ROOT.querySelectorAll('[data-ach]').forEach(b=>b.onclick = ()=>{
     const p = DB.profiles.find(x=>x.id===b.dataset.ach);
     openModal(`<h3 class="mb">Достижения — ${esc(p.name)}</h3>
