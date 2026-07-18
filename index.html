@@ -363,6 +363,25 @@ textarea{resize:vertical; min-height:90px; width:100%;}
 .note-view a, .freetext a{color:var(--accent); font-weight:700;}
 .thumb-wrap{position:relative; display:inline-flex; flex-shrink:0;}
 .thumb-count{position:absolute; right:-5px; bottom:-5px; background:var(--accent); color:#fff; font-size:11px; font-weight:800; border-radius:8px; padding:1px 5px; box-shadow:0 1px 4px rgba(0,0,0,.25); pointer-events:none;}
+.iconbtn.mv{font-size:11px; padding:4px 5px; color:#A395C2;}
+.iconbtn.mv:hover{color:var(--accent-dark);}
+/* печать дневника в PDF */
+#print-area{display:none;}
+@media print{
+  body > *:not(#print-area){display:none !important;}
+  body{background:#fff !important;}
+  #print-area{display:block; font-family:'Nunito',sans-serif; color:#3A2F52;}
+  .pr-title{font-family:'Comfortaa'; color:#4A356E; font-size:22pt; margin:0 0 12pt;}
+  .print-spread{page-break-after:always; padding-top:6pt;}
+  .print-spread:last-child{page-break-after:auto;}
+  .pr-head{font-family:'Caveat'; font-size:15pt; color:#8A6FBF; margin-bottom:8pt;}
+  .pr-cols{column-count:2; column-gap:22pt;}
+  #print-area .diary-entry{break-inside:avoid; border:1px solid #E5DcF2; border-radius:10px; padding:10pt; margin-bottom:10pt; background:#fff; box-shadow:none; position:relative;}
+  #print-area .d-date{font-size:9pt; color:#A395C2; font-weight:700;}
+  #print-area .phrase{font-family:'Caveat'; font-size:13pt; color:#4A356E;}
+  #print-area img{max-width:100%;}
+  #print-area a{color:#4A356E;}
+}
 .modal .field input, .modal .field select, .modal .field textarea{width:100%;}
 .gallery-dots span{width:9px;height:9px;border-radius:50%;background:#E0D6F0;cursor:pointer;}
 .gallery-dots span.on{background:var(--accent);}
@@ -476,7 +495,27 @@ function trackGoal(name){
 /* ================= КОНСТАНТЫ И ДЕФОЛТНЫЕ ДАННЫЕ ================= */
 const LS_KEY = 'magic_diary_v1';
 const ADMIN_PASS = 'Alisha2026';
-const MUSIC_TRACKS = ['track_01.mp3','track_02.mp3','track_03.mp3','track_04.mp3','track_05.mp3'];
+/* Треки music/track_01.mp3, track_02.mp3, … — количество не ограничено:
+   приложение само проверяет, какие файлы есть, и играет все найденные.
+   Просто добавляй новые файлы track_06.mp3, track_07.mp3 и т.д. на GitHub. */
+let MUSIC_TRACKS = ['track_01.mp3','track_02.mp3','track_03.mp3','track_04.mp3','track_05.mp3'];
+let TRACKS_DISCOVERED = false;
+function discoverTracks(){
+  if(TRACKS_DISCOVERED) return;
+  TRACKS_DISCOVERED = true;
+  const found = [];
+  let n = 1, misses = 0;
+  const tryNext = ()=>{
+    if(misses >= 2 || n > 99){ if(found.length) MUSIC_TRACKS = found; return; }
+    const name = 'track_' + String(n).padStart(2,'0') + '.mp3';
+    const a = new Audio();
+    a.preload = 'metadata';
+    a.onloadedmetadata = ()=>{ found.push(name); misses = 0; n++; tryNext(); };
+    a.onerror = ()=>{ misses++; n++; tryNext(); };
+    a.src = 'music/' + name;
+  };
+  tryNext();
+}
 const SPHERE_COLORS = ['#B39DDB','#F48FB1','#80CBC4','#FFCC80','#90CAF9','#A5D6A7','#CE93D8','#FFAB91','#9FA8DA','#E6EE9C'];
 const THEMES = [
   {id:'lavender', name:'Лаванда', color:'#8A6FBF'},
@@ -958,7 +997,7 @@ function addCoins(n, silentFloat){
 const audio = document.getElementById('bg-audio');
 let lastTrack = -1, userInteracted = false;
 document.addEventListener('pointerdown', ()=>{ 
-  if(!userInteracted){ userInteracted = true; if(P && P.settings.music && audio.paused) playRandomTrack(); }
+  if(!userInteracted){ userInteracted = true; discoverTracks(); if(P && P.settings.music && audio.paused) playRandomTrack(); }
 }, {once:false});
 function playRandomTrack(){
   if(!MUSIC_TRACKS.length) return;
@@ -1703,6 +1742,16 @@ function linkify(text){
   return esc(text).replace(/(https?:\/\/[^\s<]+)/g,
     u=>`<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
 }
+/* перемещение элемента массива вверх/вниз (для ручного порядка строк) */
+function moveInArray(arr, i, dir){
+  const j = i + dir;
+  if(i < 0 || j < 0 || j >= arr.length) return false;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+  return true;
+}
+function moveBtns(attr, id){
+  return `<button class="iconbtn mv" data-${attr}up="${id}" title="Выше">▲</button><button class="iconbtn mv" data-${attr}dn="${id}" title="Ниже">▼</button>`;
+}
 function markOverlaps(day){
   const items = [...day.schedule].sort((a,b)=>a.time<b.time?-1:1);
   for(let i=1;i<items.length;i++){
@@ -1729,6 +1778,7 @@ function renderDayItems(container, list, kind, day){
         `<button class="mark-btn mark-${mk} ${it.mark===mk?'sel':''}" data-mark="${mk}" data-for="${it.id}" title="${({done:'Выполнено',part:'Частично',fail:'Не выполнено',cancel:'Отменено'})[mk]}">${MARK_SYMBOLS[mk]}</button>`).join('')}</span>`
       : it.mark? `<span class="marks"><span class="mark-btn mark-${it.mark} sel" style="cursor:default">${MARK_SYMBOLS[it.mark]}</span></span>` : ''}
       ${DAY_MODE==='setup' && !day.completed ? `<span class="marks">
+        ${kind!=='schedule'? moveBtns('mv', it.id) : ''}
         <button class="iconbtn" data-edit="${it.id}" title="Редактировать">${ICONS.pencil}</button>
         <button class="iconbtn" data-img="${it.id}" title="Картинки (до 5)">${ICONS.camera}</button>
         <button class="iconbtn" data-del="${it.id}" title="Убрать из дня">${ICONS.trash}</button></span>`:''}
@@ -1739,6 +1789,13 @@ function renderDayItems(container, list, kind, day){
     const it = list.find(x=>x.id===b.dataset.for);
     it.mark = (it.mark === b.dataset.mark) ? null : b.dataset.mark;
     saveDB(); render();
+  });
+  // перестановка порядка (задачи и привычки; расписание сортируется по времени само)
+  container.querySelectorAll('[data-mvup]').forEach(b=>b.onclick = ()=>{
+    if(moveInArray(list, list.findIndex(x=>x.id===b.dataset.mvup), -1)){ saveDB(); render(); }
+  });
+  container.querySelectorAll('[data-mvdn]').forEach(b=>b.onclick = ()=>{
+    if(moveInArray(list, list.findIndex(x=>x.id===b.dataset.mvdn), 1)){ saveDB(); render(); }
   });
   // редактирование / удаление / картинки
   container.querySelectorAll('[data-edit]').forEach(b=>b.onclick = ()=>{
@@ -2362,11 +2419,23 @@ function renderSpheresTab(c){
   c.querySelector('#sph-stats-toggle').onclick = ()=>{ SPH_STATS_OPEN = !SPH_STATS_OPEN; render(); };
   const listBox = c.querySelector('#sph-list');
   listBox.innerHTML = P.spheres.map(s=>`
-    <button class="sphere-list-item ${s.id===SEL_SPHERE?'sel':''}" data-s="${s.id}">
+    <div class="sphere-list-item ${s.id===SEL_SPHERE?'sel':''}" data-s="${s.id}" role="button" tabindex="0" style="cursor:pointer">
       <span class="sw" style="background:${s.color}"></span>${esc(s.name)}
-      <span class="muted right" style="font-size:12px">${s.tasks.length+s.habits.length}</span>
-    </button>`).join('') || '<p class="empty-note">Сфер пока нет</p>';
-  listBox.querySelectorAll('[data-s]').forEach(b=>b.onclick = ()=>{ SEL_SPHERE = b.dataset.s; render(); });
+      <span class="right flex" style="gap:2px;align-items:center">
+        ${moveBtns('smv', s.id)}
+        <span class="muted" style="font-size:12px">${s.tasks.length+s.habits.length}</span>
+      </span>
+    </div>`).join('') || '<p class="empty-note">Сфер пока нет</p>';
+  listBox.querySelectorAll('[data-s]').forEach(b=>b.onclick = e=>{
+    if(e.target.closest('.mv')) return;
+    SEL_SPHERE = b.dataset.s; render();
+  });
+  listBox.querySelectorAll('[data-smvup]').forEach(b=>b.onclick = ()=>{
+    if(moveInArray(P.spheres, P.spheres.findIndex(x=>x.id===b.dataset.smvup), -1)){ saveDB(); render(); }
+  });
+  listBox.querySelectorAll('[data-smvdn]').forEach(b=>b.onclick = ()=>{
+    if(moveInArray(P.spheres, P.spheres.findIndex(x=>x.id===b.dataset.smvdn), 1)){ saveDB(); render(); }
+  });
   const add = c.querySelector('#sph-add');
   if(add) add.onclick = ()=>openSphereEdit(null);
   renderSpherePanel(c.querySelector('#sph-panel'));
@@ -2381,6 +2450,7 @@ function renderSpherePanel(panel){
       ${imgs.length? `<span class="thumb-wrap"><img class="thumb" src="${srcOf(imgs[0])}" data-gal="${kind}:${it.id}" alt="" onerror="this.parentNode.remove()">${imgs.length>1?`<span class="thumb-count">+${imgs.length-1}</span>`:''}</span>`:''}
       <span class="title">${esc(it.name)}</span>
       <span class="marks">
+        ${moveBtns('imv', kind+':'+it.id)}
         ${kind==='habit'? `<button class="iconbtn" data-stat="${it.id}" title="Статистика привычки">${ICONS.target}</button>`:''}
         <button class="iconbtn" data-cam="${kind}:${it.id}" title="Картинки (до 5)">${ICONS.camera}</button>
         <button class="iconbtn" data-ed="${kind}:${it.id}" title="Переименовать">${ICONS.pencil}</button>
@@ -2430,6 +2500,12 @@ function renderSpherePanel(panel){
     if(await confirmModal(`Удалить «${it.name}» из сферы?`, 'Да, удалить')){
       list.splice(list.indexOf(it),1); saveDB(); render();
     }
+  });
+  panel.querySelectorAll('[data-imvup],[data-imvdn]').forEach(b=>b.onclick = ()=>{
+    const up = b.dataset.imvup !== undefined;
+    const [kind,id] = (up? b.dataset.imvup : b.dataset.imvdn).split(':');
+    const arr = kind==='task'? s.tasks : s.habits;
+    if(moveInArray(arr, arr.findIndex(x=>x.id===id), up? -1 : 1)){ saveDB(); render(); }
   });
   panel.querySelectorAll('[data-gal]').forEach(im=>im.onclick = ()=>{
     const [kind,id] = im.dataset.gal.split(':');
@@ -2508,8 +2584,22 @@ function renderGoalsTab(c){
   checkGoalAutoStatuses();
   const sorted = [...P.goals].sort((a,b)=>{
     const d = GOAL_STATUS[a.status].order - GOAL_STATUS[b.status].order;
-    return d !== 0 ? d : (b.createdAt||0) - (a.createdAt||0);
+    if(d !== 0) return d;
+    const ao = a.order !== undefined ? a.order : -(a.createdAt||0);
+    const bo = b.order !== undefined ? b.order : -(b.createdAt||0);
+    return ao - bo;
   });
+  // стрелки двигают цель внутри её группы статусов
+  window.__moveGoal = (id, dir)=>{
+    const g = P.goals.find(x=>x.id===id);
+    const group = sorted.filter(x=>GOAL_STATUS[x.status].order === GOAL_STATUS[g.status].order);
+    const i = group.indexOf(g), j = i + dir;
+    if(j < 0 || j >= group.length) return;
+    // фиксируем ручной порядок всей группы
+    group.forEach((x,k)=>x.order = k);
+    [group[i].order, group[j].order] = [group[j].order, group[i].order];
+    saveDB(); render();
+  };
   c.innerHTML = `
     <div class="goals-layout">
       <div>
@@ -2538,6 +2628,10 @@ function goalCard(g){
       <span class="status-badge ${st.cls}">${st.name}</span>
       ${sph? `<span class="sphere-tag" style="background:${sph.color}">${esc(sph.name)}</span>`:''}
       ${g.deadline? `<span class="muted" style="white-space:nowrap">до ${fmtDateRu(g.deadline)}</span>`:''}
+      <span class="right flex" style="gap:2px" onclick="event.stopPropagation()">
+        <button class="iconbtn mv" onclick="__moveGoal('${g.id}',-1)" title="Выше">▲</button>
+        <button class="iconbtn mv" onclick="__moveGoal('${g.id}',1)" title="Ниже">▼</button>
+      </span>
       <span class="flex" style="flex-basis:100%;gap:10px;padding-left:30px">
         <span class="progress-wrap"><span class="progress-bar" style="width:${prog}%"></span></span>
         <span class="progress-label">${prog}%</span>
@@ -2720,13 +2814,13 @@ function openGoalEdit(g){
 }
 
 /* ================= ВКЛАДКА «ДНЕВНИК» (раздел 11) ================= */
-const DIARY_PER_PAGE = 3;
+function diaryPerPage(){ return (P && P.settings.diaryPerPage) || 3; } // записей на ОДНОЙ странице (колонке)
 function addDiaryEntry(e, silent){
   if(e.key && P.savedKeys[e.key]) return;
   P.diary.push({id:uid(), createdAt:Date.now(), ...e});
   if(e.key) P.savedKeys[e.key] = true;
   trackGoal('diary_saved');
-  DIARY_PAGE = Math.max(0, Math.ceil(P.diary.length / (DIARY_PER_PAGE*2)) - 1);
+  DIARY_PAGE = Math.max(0, Math.ceil(P.diary.length / (diaryPerPage()*2)) - 1);
   saveDB();
   onbComplete(5);
   if(!silent) toast('Запись добавлена в дневник 📖');
@@ -2759,16 +2853,63 @@ function diaryEntryHTML(e){
       `<span class="thumb-wrap"><img src="${srcOf(im)}" data-dgal="${e.id}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:10px;cursor:pointer;box-shadow:var(--shadow)">${i===0 && e.payload.imgs.length>1?`<span class="thumb-count">+${e.payload.imgs.length-1}</span>`:''}</span>`).join('')}</div>`:''}`;
   return `<div class="diary-entry">${del}${edit}${head}<div class="phrase">${esc(e.phrase||'')}</div>${body}</div>`;
 }
+/* Скачивание дневника в PDF: выбранные развороты собираются в печатную вёрстку,
+   открывается системное окно печати — в нём выбираешь «Сохранить как PDF». */
+function openDiaryPdf(totalSpreads){
+  if(!P.diary.length){ toast('В дневнике пока нет записей'); return; }
+  const opts = n=>Array.from({length:totalSpreads},(_,i)=>`<option value="${i}" ${i===n?'selected':''}>${i+1}</option>`).join('');
+  const m = openModal(`<h3 class="mb">📄 Дневник в PDF</h3>
+    <p class="muted mb" style="font-size:14px">Выбери развороты — откроется окно печати, где в поле «Принтер» нужно выбрать <b>«Сохранить как PDF»</b>.</p>
+    <div class="flex wrap">
+      <div class="field"><label>С разворота</label><select id="pdf-from">${opts(0)}</select></div>
+      <div class="field"><label>По разворот</label><select id="pdf-to">${opts(totalSpreads-1)}</select></div>
+    </div>
+    <div style="text-align:right" class="mt"><button class="btn" id="pdf-go">Сформировать PDF</button></div>`);
+  m.root.querySelector('#pdf-go').onclick = ()=>{
+    let from = +m.root.querySelector('#pdf-from').value;
+    let to = +m.root.querySelector('#pdf-to').value;
+    if(from > to) [from, to] = [to, from];
+    const per = diaryPerPage();
+    const old = document.getElementById('print-area');
+    if(old) old.remove();
+    const area = document.createElement('div');
+    area.id = 'print-area';
+    let html = `<h1 class="pr-title">Волшебный дневник — ${esc(P.name)}</h1>`;
+    for(let sp = from; sp <= to; sp++){
+      const entries = P.diary.slice(sp*per*2, (sp+1)*per*2);
+      html += `<div class="print-spread">
+        <div class="pr-head">Разворот ${sp+1}</div>
+        <div class="pr-cols">${entries.map(diaryEntryHTML).join('') || '<p class="muted">— пусто —</p>'}</div>
+      </div>`;
+    }
+    area.innerHTML = html;
+    area.querySelectorAll('button').forEach(b=>b.remove()); // в печати кнопки не нужны
+    document.body.appendChild(area);
+    m.close();
+    setTimeout(()=>{
+      window.print();
+      setTimeout(()=>area.remove(), 500);
+    }, 100);
+  };
+}
 function renderDiaryTab(c){
-  const spreads = Math.max(1, Math.ceil(P.diary.length / (DIARY_PER_PAGE*2)));
+  const per = diaryPerPage();
+  const spreads = Math.max(1, Math.ceil(P.diary.length / (per*2)));
   DIARY_PAGE = Math.min(DIARY_PAGE, spreads-1);
-  const start = DIARY_PAGE * DIARY_PER_PAGE * 2;
-  const leftE = P.diary.slice(start, start+DIARY_PER_PAGE);
-  const rightE = P.diary.slice(start+DIARY_PER_PAGE, start+DIARY_PER_PAGE*2);
+  const start = DIARY_PAGE * per * 2;
+  const leftE = P.diary.slice(start, start+per);
+  const rightE = P.diary.slice(start+per, start+per*2);
   c.innerHTML = `
     <div class="flex wrap mb">
       <h2>Мой дневник</h2>
-      <button class="btn right" id="dy-new">${ICONS.pencil} Добавить запись</button>
+      <span class="right flex wrap" style="gap:10px;align-items:center">
+        <label class="muted" style="font-size:13.5px;font-weight:700">Записей на странице:
+          <select id="dy-per" style="width:auto;padding:6px 9px;font-size:13.5px;margin-left:4px">
+            ${[2,3,4,6].map(n=>`<option value="${n}" ${n===per?'selected':''}>${n}</option>`).join('')}
+          </select></label>
+        <button class="btn secondary" id="dy-pdf">📄 Скачать PDF</button>
+        <button class="btn" id="dy-new">${ICONS.pencil} Добавить запись</button>
+      </span>
     </div>
     <div class="diary-stage">
       <div class="diary-bgimg">${imgHTML('images/diary_spread.png','')}</div>
@@ -2783,6 +2924,12 @@ function renderDiaryTab(c){
       <span>Разворот ${DIARY_PAGE+1} из ${spreads}</span>
       <button class="iconbtn" id="dy-next" ${DIARY_PAGE>=spreads-1?'disabled style="opacity:.35"':''}>${ICONS.right}</button>
     </div>`;
+  c.querySelector('#dy-per').onchange = e=>{
+    P.settings.diaryPerPage = +e.target.value;
+    DIARY_PAGE = 0;
+    saveDB(); render();
+  };
+  c.querySelector('#dy-pdf').onclick = ()=>openDiaryPdf(spreads);
   c.querySelector('#dy-prev').onclick = ()=>{ if(DIARY_PAGE>0){ DIARY_PAGE--; render(); } };
   c.querySelector('#dy-next').onclick = ()=>{ if(DIARY_PAGE<spreads-1){ DIARY_PAGE++; render(); } };
   c.querySelector('#dy-new').onclick = ()=>{
