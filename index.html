@@ -365,22 +365,32 @@ textarea{resize:vertical; min-height:90px; width:100%;}
 .thumb-count{position:absolute; right:-5px; bottom:-5px; background:var(--accent); color:#fff; font-size:11px; font-weight:800; border-radius:8px; padding:1px 5px; box-shadow:0 1px 4px rgba(0,0,0,.25); pointer-events:none;}
 .iconbtn.mv{font-size:11px; padding:4px 5px; color:#A395C2;}
 .iconbtn.mv:hover{color:var(--accent-dark);}
-/* печать дневника в PDF */
+.drag-handle{cursor:grab; color:#C4B8E0; font-size:15px; padding:2px 6px; user-select:none; -webkit-user-select:none; touch-action:none; flex-shrink:0; line-height:1;}
+.drag-handle:hover{color:var(--accent-dark);}
+.dragging{opacity:.92; box-shadow:0 10px 28px rgba(74,53,110,.3) !important; pointer-events:none; cursor:grabbing;}
+.sort-ph{border:2px dashed var(--accent); border-radius:12px; background:rgba(138,111,191,.08); margin:4px 0;}
+/* печать дневника в PDF: одна аккуратная колонка на А4 */
 #print-area{display:none;}
 @media print{
+  @page{size:A4; margin:14mm 16mm;}
   body > *:not(#print-area){display:none !important;}
   body{background:#fff !important;}
-  #print-area{display:block; font-family:'Nunito',sans-serif; color:#3A2F52;}
-  .pr-title{font-family:'Comfortaa'; color:#4A356E; font-size:22pt; margin:0 0 12pt;}
-  .print-spread{page-break-after:always; padding-top:6pt;}
-  .print-spread:last-child{page-break-after:auto;}
-  .pr-head{font-family:'Caveat'; font-size:15pt; color:#8A6FBF; margin-bottom:8pt;}
-  .pr-cols{column-count:2; column-gap:22pt;}
-  #print-area .diary-entry{break-inside:avoid; border:1px solid #E5DcF2; border-radius:10px; padding:10pt; margin-bottom:10pt; background:#fff; box-shadow:none; position:relative;}
-  #print-area .d-date{font-size:9pt; color:#A395C2; font-weight:700;}
-  #print-area .phrase{font-family:'Caveat'; font-size:13pt; color:#4A356E;}
-  #print-area img{max-width:100%;}
-  #print-area a{color:#4A356E;}
+  #print-area{display:block; font-family:'Nunito',sans-serif; color:#3A2F52; font-size:11pt; line-height:1.45;}
+  .pr-title{font-family:'Comfortaa'; color:#4A356E; font-size:19pt; margin:0 0 14pt; text-align:center;}
+  .print-page{page-break-after:always; position:relative;}
+  .print-page:last-child{page-break-after:auto;}
+  .pr-foot{text-align:center; color:#B7ABD6; font-size:9.5pt; margin-top:10pt; font-family:'Comfortaa';}
+  #print-area .diary-entry{break-inside:avoid; border:1.2pt solid #D9CDEF; border-radius:12pt; padding:11pt 13pt; margin:0 0 11pt; background:#fff; box-shadow:none; position:relative;}
+  #print-area .d-date{font-size:9.5pt; color:#8A6FBF; font-weight:800; letter-spacing:.4pt;}
+  #print-area .phrase{font-family:'Caveat'; font-size:15pt; color:#4A356E; margin:2pt 0 4pt;}
+  #print-area .freetext{font-size:11pt; white-space:pre-wrap;}
+  #print-area .thumb-wrap{display:inline-block;}
+  #print-area .thumb-count{display:none;}
+  #print-area img{max-width:100%; border-radius:8pt;}
+  #print-area .flex.wrap img{width:34mm !important; height:34mm !important; object-fit:cover;}
+  #print-area [style*="aspect-ratio"]{max-width:95mm;}
+  #print-area a{color:#4A356E; text-decoration:underline;}
+  #print-area .img-ph{display:none;}
 }
 .modal .field input, .modal .field select, .modal .field textarea{width:100%;}
 .gallery-dots span{width:9px;height:9px;border-radius:50%;background:#E0D6F0;cursor:pointer;}
@@ -1742,15 +1752,61 @@ function linkify(text){
   return esc(text).replace(/(https?:\/\/[^\s<]+)/g,
     u=>`<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
 }
-/* перемещение элемента массива вверх/вниз (для ручного порядка строк) */
+/* перемещение элемента массива вверх/вниз */
 function moveInArray(arr, i, dir){
   const j = i + dir;
   if(i < 0 || j < 0 || j >= arr.length) return false;
   [arr[i], arr[j]] = [arr[j], arr[i]];
   return true;
 }
-function moveBtns(attr, id){
-  return `<button class="iconbtn mv" data-${attr}up="${id}" title="Выше">▲</button><button class="iconbtn mv" data-${attr}dn="${id}" title="Ниже">▼</button>`;
+/* переставляет массив объектов в порядок списка id */
+function reorderByIds(arr, ids){
+  arr.sort((a,b)=>ids.indexOf(a.id) - ids.indexOf(b.id));
+}
+const DRAG_HANDLE = `<span class="drag-handle" title="Зажми и перетащи, чтобы изменить порядок">⠿</span>`;
+/* Универсальный drag-and-drop списков (мышь и палец — на Pointer Events).
+   container — элемент со строками itemSel; тянуть можно только за ручку .drag-handle.
+   По окончании вызывается onDrop(orderedIds) с новым порядком data-атрибута dataAttr. */
+function makeSortable(container, itemSel, dataAttr, onDrop){
+  if(!container) return;
+  container.querySelectorAll('.drag-handle').forEach(h=>{
+    h.onpointerdown = e=>{
+      e.preventDefault();
+      const dragEl = h.closest(itemSel);
+      if(!dragEl) return;
+      const r = dragEl.getBoundingClientRect();
+      const ph = document.createElement('div');
+      ph.className = 'sort-ph';
+      ph.style.height = r.height + 'px';
+      dragEl.after(ph);
+      dragEl.classList.add('dragging');
+      Object.assign(dragEl.style, {position:'fixed', width:r.width+'px', left:r.left+'px', top:r.top+'px', zIndex:999});
+      const offY = e.clientY - r.top;
+      const move = ev=>{
+        dragEl.style.top = (ev.clientY - offY) + 'px';
+        const items = [...container.querySelectorAll(itemSel)].filter(x=>x!==dragEl);
+        let placed = false;
+        for(const it of items){
+          const ir = it.getBoundingClientRect();
+          if(ev.clientY < ir.top + ir.height/2){ it.before(ph); placed = true; break; }
+        }
+        if(!placed && items.length) items[items.length-1].after(ph);
+      };
+      const up = ev=>{
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        document.removeEventListener('pointercancel', up);
+        ph.replaceWith(dragEl);
+        dragEl.classList.remove('dragging');
+        dragEl.style.cssText = dragEl.style.cssText.replace(/position[^;]*;|width[^;]*;|left[^;]*;|top[^;]*;|z-index[^;]*;/g,'');
+        const ordered = [...container.querySelectorAll(itemSel)].map(x=>x.getAttribute(dataAttr));
+        onDrop(ordered);
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+      document.addEventListener('pointercancel', up);
+    };
+  });
 }
 function markOverlaps(day){
   const items = [...day.schedule].sort((a,b)=>a.time<b.time?-1:1);
@@ -1771,6 +1827,7 @@ function renderDayItems(container, list, kind, day){
     const marks = kind==='habits' ? ['done','fail'] : ['done','part','fail','cancel'];
     const imgs = imgsOf(it);
     return `<div class="item-card" data-item="${it.id}" style="--sphere-color:${sphereColor(it.sphereId)}">
+      ${DAY_MODE==='setup' && !day.completed && kind!=='schedule' ? DRAG_HANDLE : ''}
       ${it.time? `<span class="time-badge">${it.time}<div style="font-size:11px;font-weight:600;color:#A395C2">${durLabel(it.dur||60)}</div></span>`:''}
       ${imgs.length? `<span class="thumb-wrap"><img class="thumb" src="${srcOf(imgs[0])}" data-view="${it.id}" alt="" onerror="this.parentNode.remove()">${imgs.length>1?`<span class="thumb-count">+${imgs.length-1}</span>`:''}</span>`:''}
       <span class="title">${it.goalId? '<span class="goal-flag" title="Дело цели">🎯</span> ':''}${esc(it.name)}</span>
@@ -1778,7 +1835,6 @@ function renderDayItems(container, list, kind, day){
         `<button class="mark-btn mark-${mk} ${it.mark===mk?'sel':''}" data-mark="${mk}" data-for="${it.id}" title="${({done:'Выполнено',part:'Частично',fail:'Не выполнено',cancel:'Отменено'})[mk]}">${MARK_SYMBOLS[mk]}</button>`).join('')}</span>`
       : it.mark? `<span class="marks"><span class="mark-btn mark-${it.mark} sel" style="cursor:default">${MARK_SYMBOLS[it.mark]}</span></span>` : ''}
       ${DAY_MODE==='setup' && !day.completed ? `<span class="marks">
-        ${kind!=='schedule'? moveBtns('mv', it.id) : ''}
         <button class="iconbtn" data-edit="${it.id}" title="Редактировать">${ICONS.pencil}</button>
         <button class="iconbtn" data-img="${it.id}" title="Картинки (до 5)">${ICONS.camera}</button>
         <button class="iconbtn" data-del="${it.id}" title="Убрать из дня">${ICONS.trash}</button></span>`:''}
@@ -1790,13 +1846,12 @@ function renderDayItems(container, list, kind, day){
     it.mark = (it.mark === b.dataset.mark) ? null : b.dataset.mark;
     saveDB(); render();
   });
-  // перестановка порядка (задачи и привычки; расписание сортируется по времени само)
-  container.querySelectorAll('[data-mvup]').forEach(b=>b.onclick = ()=>{
-    if(moveInArray(list, list.findIndex(x=>x.id===b.dataset.mvup), -1)){ saveDB(); render(); }
-  });
-  container.querySelectorAll('[data-mvdn]').forEach(b=>b.onclick = ()=>{
-    if(moveInArray(list, list.findIndex(x=>x.id===b.dataset.mvdn), 1)){ saveDB(); render(); }
-  });
+  // перестановка перетаскиванием (задачи и привычки; расписание сортируется по времени само)
+  if(DAY_MODE==='setup' && kind!=='schedule'){
+    makeSortable(container, '.item-card', 'data-item', ids=>{
+      reorderByIds(list, ids); saveDB(); render();
+    });
+  }
   // редактирование / удаление / картинки
   container.querySelectorAll('[data-edit]').forEach(b=>b.onclick = ()=>{
     openItemEdit(list.find(x=>x.id===b.dataset.edit), kind);
@@ -2420,21 +2475,16 @@ function renderSpheresTab(c){
   const listBox = c.querySelector('#sph-list');
   listBox.innerHTML = P.spheres.map(s=>`
     <div class="sphere-list-item ${s.id===SEL_SPHERE?'sel':''}" data-s="${s.id}" role="button" tabindex="0" style="cursor:pointer">
+      ${DRAG_HANDLE}
       <span class="sw" style="background:${s.color}"></span>${esc(s.name)}
-      <span class="right flex" style="gap:2px;align-items:center">
-        ${moveBtns('smv', s.id)}
-        <span class="muted" style="font-size:12px">${s.tasks.length+s.habits.length}</span>
-      </span>
+      <span class="muted right" style="font-size:12px">${s.tasks.length+s.habits.length}</span>
     </div>`).join('') || '<p class="empty-note">Сфер пока нет</p>';
   listBox.querySelectorAll('[data-s]').forEach(b=>b.onclick = e=>{
-    if(e.target.closest('.mv')) return;
+    if(e.target.closest('.drag-handle')) return;
     SEL_SPHERE = b.dataset.s; render();
   });
-  listBox.querySelectorAll('[data-smvup]').forEach(b=>b.onclick = ()=>{
-    if(moveInArray(P.spheres, P.spheres.findIndex(x=>x.id===b.dataset.smvup), -1)){ saveDB(); render(); }
-  });
-  listBox.querySelectorAll('[data-smvdn]').forEach(b=>b.onclick = ()=>{
-    if(moveInArray(P.spheres, P.spheres.findIndex(x=>x.id===b.dataset.smvdn), 1)){ saveDB(); render(); }
+  makeSortable(listBox, '.sphere-list-item', 'data-s', ids=>{
+    reorderByIds(P.spheres, ids); saveDB(); render();
   });
   const add = c.querySelector('#sph-add');
   if(add) add.onclick = ()=>openSphereEdit(null);
@@ -2446,11 +2496,11 @@ function renderSpherePanel(panel){
   const itemRow = (it, kind) => {
     const imgs = imgsOf(it);
     return `
-    <div class="item-card" style="--sphere-color:${s.color}">
+    <div class="item-card" data-si="${it.id}" style="--sphere-color:${s.color}">
+      ${DRAG_HANDLE}
       ${imgs.length? `<span class="thumb-wrap"><img class="thumb" src="${srcOf(imgs[0])}" data-gal="${kind}:${it.id}" alt="" onerror="this.parentNode.remove()">${imgs.length>1?`<span class="thumb-count">+${imgs.length-1}</span>`:''}</span>`:''}
       <span class="title">${esc(it.name)}</span>
       <span class="marks">
-        ${moveBtns('imv', kind+':'+it.id)}
         ${kind==='habit'? `<button class="iconbtn" data-stat="${it.id}" title="Статистика привычки">${ICONS.target}</button>`:''}
         <button class="iconbtn" data-cam="${kind}:${it.id}" title="Картинки (до 5)">${ICONS.camera}</button>
         <button class="iconbtn" data-ed="${kind}:${it.id}" title="Переименовать">${ICONS.pencil}</button>
@@ -2501,11 +2551,11 @@ function renderSpherePanel(panel){
       list.splice(list.indexOf(it),1); saveDB(); render();
     }
   });
-  panel.querySelectorAll('[data-imvup],[data-imvdn]').forEach(b=>b.onclick = ()=>{
-    const up = b.dataset.imvup !== undefined;
-    const [kind,id] = (up? b.dataset.imvup : b.dataset.imvdn).split(':');
-    const arr = kind==='task'? s.tasks : s.habits;
-    if(moveInArray(arr, arr.findIndex(x=>x.id===id), up? -1 : 1)){ saveDB(); render(); }
+  makeSortable(panel.querySelector('#sp-tasks'), '.item-card', 'data-si', ids=>{
+    reorderByIds(s.tasks, ids); saveDB(); render();
+  });
+  makeSortable(panel.querySelector('#sp-habits'), '.item-card', 'data-si', ids=>{
+    reorderByIds(s.habits, ids); saveDB(); render();
   });
   panel.querySelectorAll('[data-gal]').forEach(im=>im.onclick = ()=>{
     const [kind,id] = im.dataset.gal.split(':');
@@ -2590,14 +2640,9 @@ function renderGoalsTab(c){
     return ao - bo;
   });
   // стрелки двигают цель внутри её группы статусов
-  window.__moveGoal = (id, dir)=>{
-    const g = P.goals.find(x=>x.id===id);
-    const group = sorted.filter(x=>GOAL_STATUS[x.status].order === GOAL_STATUS[g.status].order);
-    const i = group.indexOf(g), j = i + dir;
-    if(j < 0 || j >= group.length) return;
-    // фиксируем ручной порядок всей группы
-    group.forEach((x,k)=>x.order = k);
-    [group[i].order, group[j].order] = [group[j].order, group[i].order];
+  // порядок целей меняется перетаскиванием за ⠿ (внутри группы одинаковых статусов)
+  const applyGoalOrder = ids=>{
+    P.goals.forEach(g=>{ g.order = ids.indexOf(g.id); });
     saveDB(); render();
   };
   c.innerHTML = `
@@ -2615,23 +2660,21 @@ function renderGoalsTab(c){
   c.querySelector('#g-new').onclick = ()=>openGoalEdit(null);
   const list = c.querySelector('#g-list');
   sorted.forEach(g=>list.appendChild(goalCard(g)));
+  makeSortable(list, '.goal-card', 'data-gid', applyGoalOrder);
 }
 function goalCard(g){
   const st = GOAL_STATUS[g.status];
   const prog = goalProgress(g);
   const open = OPEN_GOALS.has(g.id);
   const sph = sphereOf(g.sphereId);
-  const card = el(`<div class="goal-card">
+  const card = el(`<div class="goal-card" data-gid="${g.id}">
     <div class="goal-head" style="flex-wrap:wrap">
       <span style="transition:transform .25s;display:flex;color:var(--accent-dark);${open?'transform:rotate(90deg)':''}">${ICONS.right}</span>
       <b style="font-size:16.5px;color:var(--accent-dark);overflow-wrap:anywhere">${esc(g.title)}</b>
       <span class="status-badge ${st.cls}">${st.name}</span>
       ${sph? `<span class="sphere-tag" style="background:${sph.color}">${esc(sph.name)}</span>`:''}
       ${g.deadline? `<span class="muted" style="white-space:nowrap">до ${fmtDateRu(g.deadline)}</span>`:''}
-      <span class="right flex" style="gap:2px" onclick="event.stopPropagation()">
-        <button class="iconbtn mv" onclick="__moveGoal('${g.id}',-1)" title="Выше">▲</button>
-        <button class="iconbtn mv" onclick="__moveGoal('${g.id}',1)" title="Ниже">▼</button>
-      </span>
+      <span class="right drag-handle" title="Зажми и перетащи, чтобы изменить порядок" onclick="event.stopPropagation()">⠿</span>
       <span class="flex" style="flex-basis:100%;gap:10px;padding-left:30px">
         <span class="progress-wrap"><span class="progress-bar" style="width:${prog}%"></span></span>
         <span class="progress-label">${prog}%</span>
@@ -2853,33 +2896,63 @@ function diaryEntryHTML(e){
       `<span class="thumb-wrap"><img src="${srcOf(im)}" data-dgal="${e.id}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:10px;cursor:pointer;box-shadow:var(--shadow)">${i===0 && e.payload.imgs.length>1?`<span class="thumb-count">+${e.payload.imgs.length-1}</span>`:''}</span>`).join('')}</div>`:''}`;
   return `<div class="diary-entry">${del}${edit}${head}<div class="phrase">${esc(e.phrase||'')}</div>${body}</div>`;
 }
-/* Скачивание дневника в PDF: выбранные развороты собираются в печатную вёрстку,
-   открывается системное окно печати — в нём выбираешь «Сохранить как PDF». */
-function openDiaryPdf(totalSpreads){
+/* Скачивание дневника в PDF: записи раскладываются по страницам А4 не по количеству,
+   а по объёму (оценка в «строках»), чтобы каждая страница была заполнена красиво.
+   Открывается системное окно печати — в нём выбираешь «Сохранить как PDF». */
+const PDF_PAGE_LINES = 40; // средний лимит строк на страницу А4
+function estimateEntryLines(e){
+  let L = 3; // дата + фраза + отступы карточки
+  const textLines = t => t ? Math.ceil(t.length / 55) : 0;
+  if(e.type==='day'){
+    L += (e.payload.items||[]).length + 1;
+    L += textLines(e.payload.note);
+  } else if(e.type==='goal'){ L += 2; }
+  else if(e.type==='ach'){ L += 3; }
+  else if(['costume','house','event','travel'].includes(e.type)){
+    L += 2 + (e.payload.img ? 12 : 0); // картинка ≈ 12 строк
+  } else {
+    L += textLines(e.payload.text);
+    L += (e.payload.imgs||[]).length ? 7 : 0; // ряд фото ≈ 7 строк
+  }
+  return Math.min(L, PDF_PAGE_LINES); // одна запись не больше страницы
+}
+function paginateDiaryForPdf(){
+  const pages = [];
+  let cur = [], used = 0;
+  P.diary.forEach(e=>{
+    const L = estimateEntryLines(e);
+    if(cur.length && used + L > PDF_PAGE_LINES){ pages.push(cur); cur = []; used = 0; }
+    cur.push(e); used += L;
+  });
+  if(cur.length) pages.push(cur);
+  return pages;
+}
+function openDiaryPdf(){
   if(!P.diary.length){ toast('В дневнике пока нет записей'); return; }
-  const opts = n=>Array.from({length:totalSpreads},(_,i)=>`<option value="${i}" ${i===n?'selected':''}>${i+1}</option>`).join('');
+  const pages = paginateDiaryForPdf();
+  const opts = n=>pages.map((_,i)=>`<option value="${i}" ${i===n?'selected':''}>${i+1}</option>`).join('');
   const m = openModal(`<h3 class="mb">📄 Дневник в PDF</h3>
-    <p class="muted mb" style="font-size:14px">Выбери развороты — откроется окно печати, где в поле «Принтер» нужно выбрать <b>«Сохранить как PDF»</b>.</p>
+    <p class="muted mb" style="font-size:14px">Записи разложены по страницам А4 (получилось: <b>${pages.length}</b>).
+    Выбери страницы — откроется окно печати, где в поле «Принтер» нужно выбрать <b>«Сохранить как PDF»</b>.</p>
     <div class="flex wrap">
-      <div class="field"><label>С разворота</label><select id="pdf-from">${opts(0)}</select></div>
-      <div class="field"><label>По разворот</label><select id="pdf-to">${opts(totalSpreads-1)}</select></div>
+      <div class="field"><label>Со страницы</label><select id="pdf-from">${opts(0)}</select></div>
+      <div class="field"><label>По страницу</label><select id="pdf-to">${opts(pages.length-1)}</select></div>
     </div>
     <div style="text-align:right" class="mt"><button class="btn" id="pdf-go">Сформировать PDF</button></div>`);
   m.root.querySelector('#pdf-go').onclick = ()=>{
     let from = +m.root.querySelector('#pdf-from').value;
     let to = +m.root.querySelector('#pdf-to').value;
     if(from > to) [from, to] = [to, from];
-    const per = diaryPerPage();
     const old = document.getElementById('print-area');
     if(old) old.remove();
     const area = document.createElement('div');
     area.id = 'print-area';
-    let html = `<h1 class="pr-title">Волшебный дневник — ${esc(P.name)}</h1>`;
-    for(let sp = from; sp <= to; sp++){
-      const entries = P.diary.slice(sp*per*2, (sp+1)*per*2);
-      html += `<div class="print-spread">
-        <div class="pr-head">Разворот ${sp+1}</div>
-        <div class="pr-cols">${entries.map(diaryEntryHTML).join('') || '<p class="muted">— пусто —</p>'}</div>
+    let html = '';
+    for(let pgN = from; pgN <= to; pgN++){
+      html += `<div class="print-page">
+        ${pgN===from? `<h1 class="pr-title">✨ Волшебный дневник — ${esc(P.name)}</h1>`:''}
+        ${pages[pgN].map(diaryEntryHTML).join('')}
+        <div class="pr-foot">— ${pgN+1} —</div>
       </div>`;
     }
     area.innerHTML = html;
@@ -2889,7 +2962,7 @@ function openDiaryPdf(totalSpreads){
     setTimeout(()=>{
       window.print();
       setTimeout(()=>area.remove(), 500);
-    }, 100);
+    }, 150);
   };
 }
 function renderDiaryTab(c){
@@ -2929,7 +3002,7 @@ function renderDiaryTab(c){
     DIARY_PAGE = 0;
     saveDB(); render();
   };
-  c.querySelector('#dy-pdf').onclick = ()=>openDiaryPdf(spreads);
+  c.querySelector('#dy-pdf').onclick = ()=>openDiaryPdf();
   c.querySelector('#dy-prev').onclick = ()=>{ if(DIARY_PAGE>0){ DIARY_PAGE--; render(); } };
   c.querySelector('#dy-next').onclick = ()=>{ if(DIARY_PAGE<spreads-1){ DIARY_PAGE++; render(); } };
   c.querySelector('#dy-new').onclick = ()=>{
